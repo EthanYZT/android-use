@@ -23,7 +23,7 @@ android {
 
         buildConfigField("String", "ARK_API_KEY", "\"${localProps.getProperty("ark.apiKey", "")}\"")
         buildConfigField("String", "ARK_MODEL_ID", "\"${localProps.getProperty("ark.modelId", "")}\"")
-        buildConfigField("String", "ARK_BASE_URL", "\"${localProps.getProperty("ark.baseUrl", "https://ark.cn-beijing.volces.com/api/v3")}\"")
+        buildConfigField("String", "ARK_BASE_URL", "\"${localProps.getProperty("ark.baseUrl", "https://ark.cn-beijing.volces.com/api/plan/v3")}\"")
     }
 
     buildFeatures {
@@ -41,6 +41,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.material)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)

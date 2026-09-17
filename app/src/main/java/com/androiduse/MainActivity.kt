@@ -1,6 +1,7 @@
 package com.androiduse
 
 import android.os.Bundle
+import android.text.method.ScrollingMovementMethod
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.androiduse.databinding.ActivityMainBinding
@@ -17,6 +18,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        binding.tvLog.movementMethod = ScrollingMovementMethod()
 
         binding.btnCheckRoot.setOnClickListener {
             lifecycleScope.launch {
