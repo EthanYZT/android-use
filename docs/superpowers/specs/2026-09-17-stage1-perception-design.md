@@ -68,3 +68,39 @@ App 用 `execArgv` 通过 root 启动 `app_process` 守护进程（自带 dex/ja
 - 取树路线选 **A（root `app_process` + 临时 UiAutomation）**，否决 B（常驻 AccessibilityService，风控自毁）与 C（纯视觉，弃便宜的①级）。
 - 守护进程 v1 **①切法**（只做节点树），1e 独立子项紧随。
 - OCR vs 无障碍：**互补非二选一**。无障碍是主力（结构化、便宜、准），OCR 补节点树的洞，VLM 最后兜底（DESIGN §5.1 三级降级）。
+
+## 4. 1b Spike 结论（2026-09-17 真机验证，A 路线成立）
+
+用 `su shell app_process` 跑最小 Java probe（反射构造 `UiAutomation` + `connect`），
+在虚拟屏（`overlay_display_devices` 建的 display 16）上启动系统设置，验证结果：
+
+**✅ 核心问题回答：虚拟屏的节点树可完整读取。** `getWindowsOnAllDisplays()` 按 displayId
+分组返回，display 16 上出现 `type=1(APPLICATION) focused=true title="设置" pkg=com.android.settings`，
+其节点树含 resource-id / text / contentDescription / clickable / **屏幕 bounds**，例如
+`显示与亮度 [240,2070,900,2195]`、`WLAN`、`飞行模式 Switch text="关闭"`。物理屏（display 0）
+同时列出我们自己的 app + systemui，互不干扰。
+
+**关键实现要点（都踩过）**：
+1. **`Looper.prepareMainLooper()` 必须在 main() 开头调**。裸 app_process 没有 main looper，
+   `AccessibilityInteractionClient.<init>` 里 `new Handler(getMainLooper())` 会 NPE，崩在
+   UiAutomation 回调线程上（try/catch 拦不到），进程被 SIG 9 自杀，表面上看是 `connect()` 后
+   莫名 "Killed"。与权限/SELinux 无关。
+2. **必须开 `FLAG_RETRIEVE_INTERACTIVE_WINDOWS`**（`getServiceInfo` → 加 flag → `setServiceInfo`），
+   否则 `getWindows*` 返回空。
+3. **连接后要 `waitForIdle` + 短暂 settle**，窗口缓存靠事件填充，connect 完立刻查会是空/旧。
+4. **设备必须解锁**：keyguard 在时 app 窗口对无障碍不可见，只报一个 systemui 空壳窗口
+   （`android:id/content` 为空）。这也印证 DESIGN §8.4 锁屏门控的物理现实。
+5. **uid**：`su shell`（uid 2000）干净可用，与 uiautomator 一致；root uid 也能注册但没必要。
+6. **启动到指定屏**：singleton Activity 会复用旧实例忽略 `--display`，需
+   `am start --display <id> -f 0x18000000`（NEW_TASK|MULTIPLE_TASK）强制新实例落到目标屏。
+
+**延迟**：connect→setServiceInfo→waitForIdle→dump→disconnect 一整轮 ~1.9s，其中含我
+人为加的 ~1.2s settle sleep；纯 connect+query 约 0.7s。→ "每次 dump 都 connect/disconnect"
+可行但不免费；若叠加到每步 ~5s 模型延迟上偏重，**退化方案**：任务期间保持连接、任务结束
+才 disconnect（暴露窗口从"单次 dump"变成"整个任务"，是隐蔽性 vs 延迟的权衡，写进实现时决定）。
+
+**待处理细节**：滚出屏幕的节点 bounds 会被 clamp 成退化矩形（bottom<top，见 probe 里
+"通知与控制中心 [240,2382,900,2376]"），grounding 层要按 §5.2 处理无效 bounds。
+
+**结论**：1b 走 root `app_process` + 临时 UiAutomation 成立，可开始写守护进程。probe 源码见
+scratchpad（未入库，throwaway）。
