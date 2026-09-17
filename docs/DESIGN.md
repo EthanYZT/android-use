@@ -4,11 +4,12 @@
 > 它操作手机、调用系统工具与应用接口、加载内置 Skill、拥有记忆。
 > 接入策略：**MCP + 系统接口 + GUI 兜底**。
 
-- 状态：设计阶段（草案 v0.2）
+- 状态：设计阶段（草案 v0.3）
 - 最后更新：2026-09-17
 - 受众：作者本人 + 协作开发者（含 AI coding agent）
 - 参照对象：豆包手机助手（努比亚 NaviX Ultra）、Android 16 AppFunctions、Apple iOS 27 App Intents / Siri AI
 - 内部经验来源：`~/Desktop/01_Active_Projects/WeChat`（已上线的无障碍自动化项目，见 §11）
+- 上下文结构参考：[OpenViking](https://github.com/volcengine/OpenViking)（见 §6、§7.3、§10.3）
 
 ---
 
@@ -59,11 +60,11 @@
 │  意图理解 → 拆解子任务(依赖+优先级) → 选通道 → 执行            │
 │  → 观察结果 → 自纠错 → 超长上下文跟踪最终目标                  │
 ├───────────────┬──────────────────────────────┬───────────────┤
-│  记忆层 Memory │  能力路由 Capability Router  │  Skill 层     │
-│  短期:任务      │  ①MCP 工具                   │  SKILL.md     │
-│    transcript  │  ②系统接口 (Intent/Deep Link │  (按需加载)   │
-│  长期:偏好/授权 │    /ContentProvider/设置)    │  + 确定性脚本 │
-│  本地加密+检索  │  ③GUI 兜底                   │               │
+│  上下文层      │  能力路由 Capability Router  │  Skill 层     │
+│  Resource 知识 │  ①MCP 工具                   │  SKILL.md     │
+│  Memory  认知  │  ②系统接口 (Intent/Deep Link │  L0/L1/L2     │
+│   含 轨迹/经验 │    /ContentProvider/设置)    │   分层加载    │
+│  本地加密+检索 │  ③GUI 兜底                   │  + 确定性脚本 │
 │               │  按 可用性×可靠性×风险 择优    │               │
 ├───────────────┴──────────────────────────────┴───────────────┤
 │  安全网关  Safety Gateway (贯穿所有执行前)                    │
@@ -81,10 +82,10 @@
 ### 2.2 各层职责（一句话 + 依赖）
 
 - **交互层**：唤醒、接收指令、展示长任务进度、提供"中断/监工/追加"。依赖 Orchestrator。
-- **Orchestrator**：Agent 的主循环，唯一持有"当前目标 + 计划 + 上下文"。依赖 记忆层、能力路由、安全网关。
-- **记忆层**：读写短期任务状态与长期用户记忆。对 Orchestrator 暴露 `recall(query)` / `remember(fact)`。依赖本地加密存储。
+- **Orchestrator**：Agent 的主循环，唯一持有"当前目标 + 计划 + 上下文"。依赖 上下文层、能力路由、安全网关。
+- **上下文层**：读写 Resource / Memory / Skill 三类上下文，分层检索。对 Orchestrator 暴露 `recall(query)` / `remember(fact)` / `promote(trajectory)`。依赖本地加密存储。
 - **能力路由**：把一个"抽象动作"翻译成"具体通道调用"，做择优与降级。对 Orchestrator 暴露统一的 `execute(action)`。依赖三个通道实现 + 安全网关。
-- **Skill 层**：可复用的任务知识（SKILL.md）+ 确定性脚本。Orchestrator 按相关性加载。
+- **Skill 层**：可复用的任务知识（SKILL.md）+ 确定性脚本。Orchestrator 按 L0/L1/L2 分层加载。
 - **安全网关**：所有有副作用的执行都必须过它。可否决、可要求确认、可要求解锁。
 - **执行层**：真正落地的物理操作（注入事件、建虚拟屏、抓帧）。root daemon。
 - **感知层**：把当前屏幕变成结构化输入（截图 + 节点树 + OCR）。
@@ -101,7 +102,7 @@
   ├─ 子任务3: 通知参会人           ──→ 能力路由: 优先 MCP(飞书/微信有接口?) 
   │                                     无 → GUI 兜底: 打开 IM → 发消息
   │        └─ 安全网关: 发消息=externally-visible → 人工确认文案
-  ▼ 全程: 记忆层记录"张总=张伟(上次已确认)"; 结果写回 transcript
+  ▼ 全程: 上下文层记 entities"张总=张伟"; 跑通后沉淀 trajectory 供下次复用
 ```
 
 ---
@@ -284,29 +285,56 @@ WeChat 项目最有价值的模式之一：**每个关键动作都设计降级�
 
 ---
 
-## 6. 记忆设计
+## 6. 上下文与记忆设计
 
-### 6.1 三类记忆
+> 结构借鉴 [OpenViking](https://github.com/volcengine/OpenViking)（Volcengine，AGPL-3.0）。实现时对照它的概念模型，选型决策见 §9 阶段 4 与 §10.3。
 
-| 类型 | 内容 | 生命周期 | 存储 |
-|---|---|---|---|
-| **短期 / 任务** | 当前任务的 transcript：已执行步骤、中间结果、当前目标 | 任务内 | 内存 + 落盘(断点) |
-| **长期 / 用户** | 用户主动告知的偏好、常用地址、称呼映射（"张总=张伟"）、授权记录 | 持久 | 本地加密 DB |
-| **屏幕记忆** | 用户手动保存的屏幕内容片段，供后续检索 | 持久 | 本地加密 |
+### 6.1 三类上下文（按来源与主动性划分）
 
-### 6.2 原则
+不按"短期/长期"这种生命周期切，而按**谁来写、为什么存在**切——这个切法更本质，也让每类的读写策略天然不同。
 
-- **用户授权前提**：长期记忆只记用户主动告知或明确授权的内容。
+| 类型 | 用途 | 谁来写 | 变化频率 | 存储 |
+|---|---|---|---|---|
+| **Resource 知识** | 用户提供的外部知识与规则：业务资料、话术、产品手册、联系人表 | 用户添加 | 静态 | 本地，可加密 |
+| **Memory 认知** | Agent 从交互与执行中自己学到的 | Agent 记录 | 动态 | 本地加密 |
+| **Skill 能力** | 声明式的任务能力（见 §7） | 用户/系统 | 静态 | 本地，随 skill 更新 |
+
+### 6.2 Memory 的细分类型
+
+这是让 Agent **越用越强**的地方。前四类是"记住用户"，后两类是"记住怎么干活"——**后两类我们最初的设计漏了，但对长任务 Agent 是关键**。
+
+| 类型 | 内容 | 例子 |
+|---|---|---|
+| `profile` | 用户基本信息 | 姓名、公司、角色 |
+| `preferences` | 按主题组织的偏好 | 常用地址、称呼习惯、回复语气 |
+| `entities` | 人、项目、组织的知识 | "张总 = 张伟，A 项目负责人" |
+| `events` | 决策与里程碑 | "9/17 已确认下周二改期" |
+| **`trajectories`** | **可复用的任务执行轨迹** | "在小红书发图文"跑通过一次的完整步骤序列 |
+| **`experiences`** | **从执行结果提炼的经验** | "微信发送按钮不能按文字找，会命中视频气泡" |
+
+**`trajectories` / `experiences` 的意义**：Agent 跑通一次任务后，把轨迹和踩过的坑沉淀下来；下次遇到同类任务不用从零摸索，直接复用。这是 §4.5 自纠错的上层——自纠错解决"这次怎么爬起来"，经验记忆解决"下次不再摔"。
+
+**与 Skill 的关系**：`trajectories` 是自动沉淀的原始轨迹，`skills` 是人工或自动提炼后的正式能力。**轨迹跑稳了可以晋升为 skill**（含 §7.4 的选择器），形成闭环。
+
+### 6.3 短期任务状态（不属于上述三类）
+
+当前任务的 transcript——已执行步骤、中间结果、当前目标——是**运行时状态**，不是记忆。生命周期在任务内，落盘只为断点续跑（§4.5）。任务结束时才决定：哪些提炼进 `events`/`trajectories`/`experiences`，其余丢弃。
+
+### 6.4 原则
+
+- **用户授权前提**：Memory 只记用户主动告知或明确授权的内容。
 - **本地优先 + 加密**：数据优先本地处理、加密存储，不默认上云。
-- **自然语言检索**：`recall("我家地址")` → 从本地记忆返回。
-- **可查可删**：所有记忆记录用户可查看、可删除。
+- **自然语言检索**：`recall("我家地址")` → 返回相关上下文。
+- **可查可删**：所有记录用户可查看、可删除。
+- **写入要去重**：新提取的记忆需与已有记忆比对，决定**新建 / 合并 / 跳过**，否则会积累大量近似重复条目。
 
-### 6.3 接口
+### 6.5 接口
 
 ```
-memory.remember(fact, {scope, source, ttl})
-memory.recall(query) -> [relevant facts]
-memory.forget(id | query)
+context.remember(fact, {type, scope, source})    # type: profile|preferences|entities|events|trajectories|experiences
+context.recall(query, {scope}) -> [relevant items]
+context.forget(id | query)
+context.promote(trajectory_id) -> skill          # 轨迹跑稳 → 晋升为 skill
 ```
 
 ---
@@ -336,10 +364,35 @@ capability_hint: gui   # gui | system | mcp
 5. 发布前 → 安全网关: 发布=公开内容 → 人工确认
 ```
 
-### 7.3 加载机制
+### 7.3 分层加载：L0 / L1 / L2
 
-- Orchestrator 根据用户意图 + skill 的 `description/triggers` 做相关性匹配，按需把 SKILL.md 注入上下文。
+> 借鉴 OpenViking 的 context layers。这是上下文工程的核心——**手机端每 token 都是钱和延迟**。
+
+只按 `description/triggers` 匹配后整篇注入太粗糙：skill 一多，要么漏掉相关的，要么把无关的全塞进上下文。改成三层，**先读摘要判断相关性，真正需要才读全文**：
+
+| 层 | 内容 | 什么时候读 | 体量 |
+|---|---|---|---|
+| **L0 摘要** | 一句话说明这个 skill 干什么 | **常驻**上下文，用于快速筛选 | ~20 字 |
+| **L1 概览** | 核心步骤、适用场景、前置条件 | 判断"可能相关"后读，用于规划 | ~200 字 |
+| **L2 全文** | 完整 SKILL.md：详细步骤、选择器、脚本挂载点 | 确定要执行时才读 | 不限 |
+
+目录结构：
+
+```
+skills/
+├── .abstract.md                  # L0: 本目录所有 skill 的一句话索引
+├── xiaohongshu-post/
+│   ├── .abstract.md              # L0
+│   ├── .overview.md              # L1
+│   └── SKILL.md                  # L2 全文
+└── wechat-send-message/
+    └── ...
+```
+
+**同样的分层适用于记忆（§6）和知识资源**——检索时先看目录摘要，再决定深入哪个目录。
+
 - 与 Claude Code 的 skill 机制同构，降低学习成本、便于复用现有生态。
+- L0/L1 可由 L2 自动生成（写入 skill 时跑一次提炼），不需要人工维护三份。
 
 ### 7.4 选择器归 Skill 管（应对 App 改版）
 
@@ -465,9 +518,27 @@ fn preflight(action, expected_context) -> Decision:
 - **目标**：GUI 覆盖任意 App；安全网关全量生效。
 - **验收**：在一个无接口的第三方 App 上完成一个任务；所有 financial/destructive 动作被正确拦截确认；污染文本不被当指令。
 
-### 阶段 4：记忆
-- **目标**：长期记忆可写可查可删，任务能用上记忆。
-- **验收**："记住我家地址是…" → 下次打车任务自动带入。
+### 阶段 4：记忆 ⚠️ 含架构决策点
+- **目标**：§6 的三类上下文可写可查可删，任务能用上记忆。
+- **验收**：
+  1. "记住我家地址是…" → 下次打车任务自动带入。
+  2. 同一类任务跑第二次时，能复用第一次的 `trajectory`，步数明显减少。
+
+**决策点：记忆后端自建还是用 OpenViking？**
+
+进入本阶段前必须先定这个，因为它影响架构（是否引入网络依赖）。
+
+| | 自托管 OpenViking（手机做客户端） | 自研轻量端侧记忆 |
+|---|---|---|
+| 成本 | 低——现成的分层检索、去重合并、经验提炼，有 benchmark 背书 | 高——embedding、检索、去重、合并全要自己写 |
+| 依赖 | **Python 服务跑在 Mac/NAS/VPS，手机通过 MCP/SDK 连** | 无，全在端侧 |
+| 离线 | **离线失忆** | 可用 |
+| 隐私 | 记忆离开设备（自托管可控，但不再是端侧） | 守住 §8.7 端侧原则 |
+| 许可 | **AGPL-3.0**，需要确认传染边界 | 无约束 |
+
+**判断的关键问题**：能否接受"手机离线时 Agent 失忆"。Planner 本来就是云端 API（离线也用不了），所以网络依赖不是新增的；但记忆和推理的**离线降级行为不一样**——推理没网就是不能用，记忆没网可能导致 Agent 做出错误决策（以为用户没说过某事）。
+
+**倾向**：先按 §6 的接口（`context.remember/recall/forget/promote`）实现一个最小端侧版本，**把接口设计成能换后端**。等真实数据量上来、检索质量成为瓶颈时，再评估换 OpenViking。接口隔离让这个决策可以推迟。
 
 ### 阶段 5：Skill 生态 + 长任务
 - **目标**：SKILL.md 加载机制 + 断点续跑；跑通一个数十步的真实长任务。
@@ -497,6 +568,18 @@ fn preflight(action, expected_context) -> Decision:
 - **[Core-Mate/open-gui](https://github.com/Core-Mate/open-gui)**——Android GUI Agent 框架，AccessibilityService + 手势 + 远程下发，可作起步基座。
 - **[droidrun/droidrun](https://github.com/droidrun/droidrun)**（9k★）——LLM 无关的移动 Agent，ADB/Portal 模式。
 - **[bytedance/UI-TARS](https://github.com/bytedance/UI-TARS)**——豆包同源 GUI 模型，可自部署做 Grounder。
+- **[volcengine/OpenViking](https://github.com/volcengine/OpenViking)**（38k★，AGPL-3.0）——Agent 上下文数据库，统一 Memory / RAG / Skills。**§6 和 §7.3 的结构直接借鉴自它**，实现时对照参考。详见下方。
+
+#### OpenViking 备注
+
+- **是什么**：`viking://` 虚拟文件系统，Agent 用 `ls`/`tree`/`read`/`write`/`find`/`grep` 操作上下文。三类：Resource（知识）/ Memory（认知）/ Skill（能力），skill 格式就是 `SKILL.md`，与我们 §7 同构。
+- **效果数据**：LoCoMo 长对话记忆，三个 Agent 接入后从 24–57% 提升到 80–83%，同时输入 token 降 34–91%、查询延迟降 58–66%；tau2-bench 任务成功率 +6.9pp（retail）/ +11.9pp（airline）。
+- **我们借鉴了什么**：L0/L1/L2 分层加载（§7.3）、Resource/Memory/Skill 三分类（§6.1）、`trajectories`/`experiences` 记忆类型（§6.2）、写入去重合并（§6.4）。
+- **为什么不直接用**（至少阶段 0–3 不用）：
+  1. **是 Python 服务端**（3.10+，fastapi/scrapy/pdfplumber，cmake+maturin 原生编译），仓库里搜 `android`/`termux` 零结果，桌面端只有 macOS/Windows——**跑不到手机上**，与"手机端常驻"冲突。
+  2. **AGPL-3.0** 强 copyleft 带网络条款，需要先厘清传染边界再决定是否引入。
+  3. 与 §8.7「端侧优先、不默认上云」有张力。
+- **接入方式（如果阶段 4 决定用）**：服务跑在 Mac/NAS/VPS，手机通过 **MCP** 连——正好落在 §3.1 的①通道，不需要为它新增架构。
 
 ### 10.4 系统底座
 
@@ -527,7 +610,7 @@ fn preflight(action, expected_context) -> Decision:
 | `ScreenOcr.kt` | ML Kit 本地 OCR + 阅读顺序拼接 | 直接搬 |
 | `WeChatUi.kt` / `WeComUi.kt` | 微信/企微选择器与启发式 | 改造成 §7.4 的 skill 格式 |
 | `GroupHeuristics.kt` | 群聊/单聊判定 | 参考 |
-| `kb/` 包 | 分块、embedding、同步、检索 | 记忆层（§6）可直接借鉴其 RAG 实现 |
+| `kb/` 包 | 分块、embedding、同步、检索 | 上下文层（§6）的端侧最小实现可直接借鉴 |
 | `reply/` 包 | 多 LLM provider 抽象、prompt 构建、响应解析 | Planner 层的 provider 抽象可参考 |
 
 ### 11.2 架构层面的经验
