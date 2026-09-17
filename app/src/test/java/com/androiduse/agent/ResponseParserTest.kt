@@ -74,4 +74,47 @@ class ResponseParserTest {
         assertTrue(PromptBuilder.systemPrompt().contains("0"))
         assertTrue(PromptBuilder.systemPrompt().contains("1000"))
     }
+
+    // --- Fix round 1: robustness against malformed / adversarial model output ---
+
+    @Test
+    fun returnsNullWhenRequiredFieldIsMissing() {
+        // 缺少 y，不应该抛异常，应该返回 null 让调用方重试或中止。
+        assertNull(ResponseParser.parseAction("""{"action":"tap","x":500}"""))
+    }
+
+    @Test
+    fun returnsNullWhenFieldHasWrongType() {
+        // x 应该是数字，模型给了字符串——toIntOrNull 拿到 null，整体返回 null，不抛异常。
+        assertNull(ResponseParser.parseAction("""{"action":"tap","x":"abc","y":620}"""))
+    }
+
+    @Test
+    fun returnsNullOnTruncatedJsonWithoutHanging() {
+        // 只有开括号没有闭括号：extractFirstJsonObject 的深度永远不会归零，
+        // 循环只跑一遍 text.length 就结束，不会死循环，也不会抛异常。
+        assertNull(ResponseParser.parseAction("""{"action":"tap","x":500"""))
+    }
+
+    @Test
+    fun keyCollisionInStringValueDoesNotConfuseParser() {
+        // summary 的值恰好是被引号包裹的 "action" 片段，正好卡在两个真实字段之间。
+        // 旧的按位置查找实现会把这个值误当成字段名，顺着往后找冒号会落到 "x" 字段
+        // 上，从而把整条动作解析成 null——这里断言锚定之后能正确拿到真正的
+        // action（finish）和完整的 summary。
+        val raw = """{"summary":"action","x":1,"action":"finish"}"""
+        assertEquals(Action.Finish("action"), ResponseParser.parseAction(raw))
+    }
+
+    @Test
+    fun extractContentFindsRealContentWhenReasoningContentComesFirst() {
+        // 真实响应形态：这是个推理模型，message 对象里 reasoning_content /
+        // encrypted_content 都在 content 前面，字段顺序不受我们控制。
+        val api = """
+            {"choices":[{"finish_reason":"stop","index":0,"message":{
+            "reasoning_content":"\n用户现在让只回复两个字…","encrypted_content":"djHFzewr…",
+            "content":"收到","role":"assistant"}}]}
+        """.trimIndent()
+        assertEquals("收到", ResponseParser.extractContent(api))
+    }
 }

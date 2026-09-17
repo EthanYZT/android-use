@@ -11,8 +11,8 @@ import java.util.concurrent.TimeUnit
  * 调用火山方舟 Agent Plan 订阅套餐的 OpenAI 兼容接口。
  *
  * baseUrl 必须是 .../api/plan/v3（订阅通道），不是 .../api/v3（按量计费通道）——
- * 后者会产生额外费用且订阅 key 在那里鉴权失败。model 统一传 ark-code-latest，
- * 实际使用哪个模型由方舟控制台的「使用配置」决定。
+ * 后者会产生额外费用且订阅 key 在那里鉴权失败。model 由调用方传入，实际配置为
+ * BuildConfig.ARK_MODEL_ID（当前是 glm-5.3-flash），来自 local.properties。
  *
  * 只做 HTTP，不含解析逻辑——解析在 ResponseParser 里，那部分可单测。
  */
