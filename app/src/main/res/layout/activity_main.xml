@@ -11,6 +11,18 @@
         android:layout_height="wrap_content"
         android:text="检查 Root" />
 
+    <Button
+        android:id="@+id/btnCreateScreen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="建虚拟屏并打开设置" />
+
+    <Button
+        android:id="@+id/btnDestroyScreen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="销毁虚拟屏" />
+
     <TextView
         android:id="@+id/tvLog"
         android:layout_width="match_parent"
