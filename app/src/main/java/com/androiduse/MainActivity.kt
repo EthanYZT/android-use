@@ -31,24 +31,43 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnCreateScreen.setOnClickListener {
             lifecycleScope.launch {
-                val screen = withContext(Dispatchers.IO) {
-                    VirtualDisplayManager.create()?.also {
-                        VirtualDisplayManager.launchIntentAction("android.settings.SETTINGS", it)
+                setScreenButtonsEnabled(false)
+                try {
+                    val screen = withContext(Dispatchers.IO) { VirtualDisplayManager.create() }
+                    if (screen == null) {
+                        appendLog("建屏失败")
+                    } else {
+                        val launched = withContext(Dispatchers.IO) {
+                            VirtualDisplayManager.launchIntentAction("android.settings.SETTINGS", screen)
+                        }
+                        appendLog(
+                            "建屏成功 logicalId=${screen.logicalDisplayId} sfId=${screen.surfaceFlingerId.toULong()} " +
+                                "启动=${if (launched) "成功" else "失败"}"
+                        )
                     }
+                } finally {
+                    setScreenButtonsEnabled(true)
                 }
-                appendLog(
-                    if (screen == null) "建屏失败"
-                    else "建屏成功 logicalId=${screen.logicalDisplayId} sfId=${screen.surfaceFlingerId.toULong()}"
-                )
             }
         }
 
         binding.btnDestroyScreen.setOnClickListener {
             lifecycleScope.launch {
-                withContext(Dispatchers.IO) { VirtualDisplayManager.destroy() }
-                appendLog("已销毁虚拟屏")
+                setScreenButtonsEnabled(false)
+                try {
+                    val destroyed = withContext(Dispatchers.IO) { VirtualDisplayManager.destroy() }
+                    appendLog(if (destroyed) "已销毁虚拟屏" else "销毁虚拟屏失败")
+                } finally {
+                    setScreenButtonsEnabled(true)
+                }
             }
         }
+    }
+
+    /** 建屏/销屏操作进行中禁用两个按钮，避免用户并发点击触发重叠调用。 */
+    private fun setScreenButtonsEnabled(enabled: Boolean) {
+        binding.btnCreateScreen.isEnabled = enabled
+        binding.btnDestroyScreen.isEnabled = enabled
     }
 
     private fun appendLog(line: String) {
