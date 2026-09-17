@@ -1,0 +1,8 @@
+# 复制为 local.properties 后填入真实值。local.properties 不入库。
+sdk.dir=/Users/YOURNAME/Library/Android/sdk
+# Agent Plan 订阅套餐的专属 API Key（控制台 → 订阅 → Agent Plan → 使用配置）
+ark.apiKey=你的 Agent Plan 专属 API Key
+# 阶段 0 的 grounder，实测最省 token 且命中准确；备选 doubao-seed-2.0-lite
+ark.modelId=glm-5.3-flash
+# 必须用 /api/plan/v3。用 /api/v3 会走按量计费并产生额外费用
+ark.baseUrl=https://ark.cn-beijing.volces.com/api/plan/v3
