@@ -24,7 +24,29 @@ object RootShell {
         run(listOf("su", "-c", command), timeoutMs)
 
     /**
-     * 真正跑进程的核心逻辑，接受任意 argv。生产代码只应通过 [exec]（会套上 `su -c`）；
+     * 带外部字符串参数的 root 调用入口。**任何来自模型/屏幕/网络的不可信字符串都必须走
+     * 这里，绝不能拼进 [exec] 的 command。**
+     *
+     * 与 [exec] 的本质区别：`exec` 把整条命令交给 shell 解析，字符串里的 `;` `$` `|`
+     * 空格、引号都会被二次解释——不可信字符串一旦流进去就是 root 命令注入原语。本方法用
+     *
+     *     su -c 'exec "$@"' -- arg0 arg1 arg2 ...
+     *
+     * `-c` 后面那段是**固定字面量**，不含任何用户数据；真正的参数全部落在 `$@` 位置参数上，
+     * shell 不会对它们做拆词、变量展开或元字符解释——每个 [argv] 元素原样成为目标程序的一个
+     * 参数。语义与 execve 直接传 argv 等价，只是借道 su 拿 root。
+     *
+     * `argv[0]` 是要执行的程序名（如 "input"、"am"），其余是它的参数。
+     * 例：`execArgv(listOf("input", "-d", "7", "text", 不可信文本))`——不可信文本即便含
+     * `;rm -rf /` 也只是 `input text` 的一个字面参数，不会被执行。
+     *
+     * 单测见 RootShellArgvTest（用 sh 代 su 验证同一包裹语义，可在无 root 构建机上跑）。
+     */
+    fun execArgv(argv: List<String>, timeoutMs: Long = 15_000): ShellResult =
+        run(listOf("su", "-c", "exec \"\$@\"", "--") + argv, timeoutMs)
+
+    /**
+     * 真正跑进程的核心逻辑，接受任意 argv。生产代码通过 [exec]（拼 `su -c <string>`）或 [execArgv]（`su -c` + 固定包裹 + argv）调用；
      * 这里单独拆出来是为了让单测能在没有 su / 没有真机的情况下，用普通 shell 命令
      * 驱动同一套“并发排空 stdout/stderr 再 waitFor”的逻辑。
      *
