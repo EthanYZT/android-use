@@ -3,6 +3,7 @@ package com.androiduse.perception
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import android.util.Log
 import com.androiduse.display.VirtualScreen
 import com.androiduse.root.RootShell
 import java.io.ByteArrayOutputStream
@@ -25,6 +26,7 @@ import java.io.File
  */
 object ScreenCapture {
 
+    private const val TAG = "ScreenCapture"
     private const val TMP_PATH = "/data/local/tmp/androiduse_frame.png"
 
     fun capture(screen: VirtualScreen): Bitmap? = synchronized(this) {
@@ -37,8 +39,15 @@ object ScreenCapture {
         // 不需要 666 那么宽。
         val appFile = appCacheFile()
         val cp = RootShell.exec("cp $TMP_PATH ${appFile.absolutePath} && chmod 644 ${appFile.absolutePath}")
-        if (!cp.ok) return@synchronized null
 
+        // F-7：/data/local/tmp 是 shell 可读目录，DESIGN §8.7 的隐私底线是敏感截图不能留在
+        // 那种地方。不管上面 cp 是否成功都要删——成功路径已经把内容复制到 App 私有目录，
+        // 失败路径也不该把半成品截图留在 shell 可读的地方。`-f` 保证文件已不存在时不报错；
+        // 删除失败只记日志，不影响本次截图的返回值（cp 才是决定返回值的关键路径）。
+        val rm = RootShell.exec("rm -f $TMP_PATH")
+        if (!rm.ok) Log.w(TAG, "清理临时截图 $TMP_PATH 失败: ${rm.stderr}")
+
+        if (!cp.ok) return@synchronized null
         BitmapFactory.decodeFile(appFile.absolutePath)
     }
 

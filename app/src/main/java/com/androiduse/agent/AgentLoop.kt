@@ -42,6 +42,12 @@ class AgentLoop(
                 ?: return@withContext finish(step, System.currentTimeMillis() - t0, "截图失败", onProgress)
 
             val (action, raw) = client.decideNextAction(task, history, frame)
+            // F-8：原始响应是阶段 1 grounding 排障最有价值的语料——一次"解析成功但点错
+            // 位置"的 tap，事后只能靠这份原始文本复盘。之前只在解析失败时记录，成功路径
+            // 完全不可恢复。这里无论成败都记一条并推给 onProgress，进同一份可查的日志，
+            // 截断长度与 ArkVisionClient 的截断一致（300 字符，两处不一致是已知 deferred 项）。
+            onProgress(logger.step(step, "RawResponse", "gui", 0, raw.take(300)))
+
             if (action == null) {
                 return@withContext finish(
                     step,
@@ -57,25 +63,10 @@ class AgentLoop(
                 return@withContext "任务完成: ${action.summary}"
             }
 
-            if (action is Action.Home) {
-                // 2026-09-17 实测：overlay 虚拟屏上的 HOME 键不会被 -d 参数隔离在目标屏
-                // 内，会被系统路由到物理屏（display 0）的桌面 Launcher，直接抢走物理
-                // 前台——正是验收标准③要保护的东西。目前没有真正按屏隔离的 Home 实现，
-                // 所以宁可拒绝执行也不能悄悄捅穿物理屏；PromptBuilder 已经不再主动提供
-                // 这个动作，这里是防模型仍然选中它的兜底。阶段 1 需要解决隔离问题本身，
-                // 而不是重新发现这个坑。
-                val cost = System.currentTimeMillis() - t0
-                val line = logger.step(
-                    step,
-                    "Home",
-                    "gui",
-                    cost,
-                    "拒绝执行: HOME 键会跨屏抢占物理屏前台(已知问题), 未注入",
-                )
-                onProgress(line)
-                return@withContext "第 $step 步拒绝执行 Home 动作，已中止"
-            }
-
+            // F-3：Action.Home 的拒绝不再放在这里判断——它已经下沉到 ActionCommand.toShell /
+            // Injector.perform（构造即拒绝，见那两处的注释），任何调用 Injector.perform 的
+            // 路径都无法绕过，不必也不应该在这一层重复判断。模型选中 Home 时会走下面的
+            // Injector.perform，拿到 ok=false，按普通注入失败中止——效果等价，且不可被绕过。
             val ok = Injector.perform(action, screen)
             val cost = System.currentTimeMillis() - t0
             val line = logger.step(step, action.toString(), "gui", cost, if (ok) "ok" else "注入失败")

@@ -17,10 +17,21 @@ object Injector {
     fun perform(action: Action, screen: VirtualScreen): Boolean {
         if (action is Action.Finish) return true
         if (action is Action.Wait) {
-            Thread.sleep(action.ms.toLong())
+            // F-1：再夹一次，防止未来出现不经 ResponseParser 构造 Action.Wait 的调用方
+            // 重新把未夹紧的值捅到这里——解析边界已经夹过一次（ResponseParser），这里是
+            // 纵深防御，不依赖调用方守规矩。
+            Thread.sleep(Action.Wait.clamp(action.ms).toLong())
             return true
         }
-        val cmd = ActionCommand.toShell(action, screen) ?: return true
+        val cmd = ActionCommand.toShell(action, screen)
+        if (cmd == null) {
+            // F-6：默认失败关闭，不是失败开放。toShell 返回 null 有两种可能：未来新增
+            // action 忘了在 toShell 里处理（bug），或者是像 Action.Home 那样故意拒绝
+            // （见 ActionCommand.toShell 对 Home 的注释，F-3）。两种情况都不该被上报成
+            // "注入成功"——调用方（AgentLoop）靠这个返回值判断世界状态是否真的被动过；
+            // 谎报成功会让循环带着错误的假设继续往下跑。
+            return false
+        }
         val ok = RootShell.exec(cmd).ok
         if (ok) Thread.sleep(jitter(BASE_SETTLE_MS))
         return ok

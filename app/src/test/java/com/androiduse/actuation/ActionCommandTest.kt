@@ -36,8 +36,12 @@ class ActionCommandTest {
     }
 
     @Test
-    fun homeMapsToKeyevent3() {
-        assertEquals("input -d 3 keyevent 3", ActionCommand.toShell(Action.Home, screen))
+    fun homeIsRefusedByConstructionNotJustByCaller() {
+        // F-3: 曾经这条测试断言 Home 产出 "input -d 3 keyevent 3"，把危险的映射锁进了测试里。
+        // 2026-09-17 真机实测证明这条命令不受 -d 隔离，会把物理屏(display 0)从本 App 切到
+        // 桌面 Launcher。拒绝点现在落在 toShell 本身(见其对 Action.Home 分支的注释)，
+        // 不是只在上层 AgentLoop 里挡一下——任何调用 Injector.perform 的路径都无法绕过。
+        assertNull(ActionCommand.toShell(Action.Home, screen))
     }
 
     @Test

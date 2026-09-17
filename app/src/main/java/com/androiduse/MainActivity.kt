@@ -128,6 +128,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // F-2：overlay_display_devices 是跨进程、**跨重启**持久化的全局 setting（见
+        // VirtualDisplayManager 顶部注释）。这个 Activity 是虚拟屏的唯一创建者，如果它销毁
+        // 时不清理，用户划掉 App 或系统杀掉进程后，这块叠加窗口会作为可见的悬浮窗永远留在
+        // 物理屏上，直到手动执行 destroy 或重启手机——而重启后设置还在，悬浮窗会再出现。
+        //
+        // 只在 isFinishing 为 true（Activity 真正结束）时清理，配置变更（例如旋转屏幕）触发
+        // 的销毁-重建不算：那种情况 isFinishing 是 false，马上会有一个新的 Activity 实例
+        // 接手同一个 currentScreen 继续用，销毁虚拟屏反而会把它拆掉。
+        //
+        // 这里同步调用而不是丢进 lifecycleScope：Activity 销毁时 lifecycleScope 已经被取消，
+        // 协程可能一步都不跑就被丢弃，清理无法保证发生；VirtualDisplayManager.destroy() 只是
+        // 几条快速的 settings 读写命令（不是 RootShell 默认 15s 超时的重活），同步跑完可接受。
+        if (isFinishing) {
+            VirtualDisplayManager.destroy()
+            currentScreen = null
+        }
+    }
+
     /** 建屏/销屏/截图/执行任务操作进行中禁用相关按钮，避免用户并发点击触发重叠调用。 */
     private fun setScreenButtonsEnabled(enabled: Boolean) {
         binding.btnCreateScreen.isEnabled = enabled

@@ -3,7 +3,6 @@ package com.androiduse.agent
 import com.androiduse.actuation.Action
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ResponseParserTest {
@@ -69,10 +68,27 @@ class ResponseParserTest {
         assertNull(ResponseParser.extractContent("""{"error":{"message":"bad key"}}"""))
     }
 
+    // 系统提示词自身的断言（坐标约定/反注入声明/不提供 home）移到了 PromptBuilderTest，
+    // 那边有对应 F-4(a) 的完整覆盖，这里不再重复一条近乎空断言的测试（旧版只检查
+    // contains("0") 且被 contains("1000") 完全包含，见 final-fix-report F-4）。
+
+    // --- F-1: Wait.ms 是不可信输入，解析边界必须夹到合理范围内 ---
+
     @Test
-    fun systemPromptTellsModelToUseNormalizedCoordinates() {
-        assertTrue(PromptBuilder.systemPrompt().contains("0"))
-        assertTrue(PromptBuilder.systemPrompt().contains("1000"))
+    fun clampsNegativeWaitMsToZero() {
+        // {"ms":-1} 若不夹紧，Injector 里的 Thread.sleep(-1) 会抛 IllegalArgumentException，
+        // 没有任何调用方 catch 它，会一路崩到 MainActivity 的 lifecycleScope.launch。
+        assertEquals(Action.Wait(0), ResponseParser.parseAction("""{"action":"wait","ms":-1}"""))
+    }
+
+    @Test
+    fun clampsHugeWaitMsToUpperBound() {
+        // {"ms":86400000}（一天）若不夹紧，会在 withContext(Dispatchers.IO) 里长时间阻塞，
+        // 且 ensureActive() 只在步骤边界检查，中途取消不了——按钮会一直禁用到步数耗尽。
+        assertEquals(
+            Action.Wait(Action.Wait.MAX_MS),
+            ResponseParser.parseAction("""{"action":"wait","ms":86400000}"""),
+        )
     }
 
     // --- Fix round 1: robustness against malformed / adversarial model output ---

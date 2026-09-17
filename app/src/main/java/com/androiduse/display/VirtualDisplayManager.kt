@@ -38,19 +38,28 @@ object VirtualDisplayManager {
             }
 
             val before = currentLogicalIds()
+            val beforeSf = currentVirtualSfIds().toSet()
 
             val spec = "${widthPx}x${heightPx}/${densityDpi}"
             val put = RootShell.exec("settings put global $SETTING_KEY \"$spec\"")
             if (!put.ok) return null
 
-            // 显示子系统建屏是异步的，轮询等它出现，最多 5 秒
+            // 显示子系统建屏是异步的，轮询等它出现，最多 5 秒。
+            //
+            // F-5：两层 id 都用"建屏前后的集合差"来找新出现的那个，保持对称——不能只对
+            // 逻辑层做差集，SF 层却图省事取"第一个"（currentVirtualSfId() 是按 dump 顺序取
+            // 第一条，如果设备上恰好残留一块没有逻辑屏对应的孤儿 SF 虚拟屏，会命中它而不是
+            // 真正新建的那块，产出一个两个 id 描述不同屏的 VirtualScreen 且不报错）。
+            // newSfIds 必须恰好是一个新增元素才配对；0 个（还没出现）或 >1 个（不止一块新增，
+            // 无法确定哪个是我们刚建的）都继续重试，而不是随便挑一个。
             repeat(10) {
                 Thread.sleep(500)
                 val after = currentLogicalIds()
                 val newId = (after - before.toSet()).minOrNull()
                 if (newId != null) {
-                    // 本轮还没解析出 sfId：继续下一轮重试，不是中断整个 repeat。
-                    val sfId = currentVirtualSfId() ?: return@repeat
+                    val newSfIds = currentVirtualSfIds().toSet() - beforeSf
+                    // 本轮还没解析出恰好一个新 sfId：继续下一轮重试，不是中断整个 repeat。
+                    val sfId = newSfIds.singleOrNull() ?: return@repeat
                     return VirtualScreen(newId, sfId, widthPx, heightPx)
                 }
             }
@@ -99,6 +108,11 @@ object VirtualDisplayManager {
 
     private fun currentVirtualSfId(): Long? =
         DisplayParser.parseVirtualSurfaceFlingerId(
+            RootShell.exec("dumpsys SurfaceFlinger --display-id").stdout
+        )
+
+    private fun currentVirtualSfIds(): List<Long> =
+        DisplayParser.parseVirtualSurfaceFlingerIds(
             RootShell.exec("dumpsys SurfaceFlinger --display-id").stdout
         )
 }

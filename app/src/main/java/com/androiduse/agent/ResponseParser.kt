@@ -32,7 +32,7 @@ object ResponseParser {
             }
             "back" -> Action.Back
             "home" -> Action.Home
-            "wait" -> Action.Wait(intField(json, "ms") ?: 500)
+            "wait" -> Action.Wait(Action.Wait.clamp(intField(json, "ms") ?: 500))
             "finish" -> Action.Finish(field(json, "summary") ?: "")
             else -> null
         }
