@@ -4,9 +4,13 @@ import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.androiduse.BuildConfig
+import com.androiduse.agent.AgentLoop
+import com.androiduse.agent.ArkVisionClient
 import com.androiduse.databinding.ActivityMainBinding
 import com.androiduse.display.VirtualDisplayManager
 import com.androiduse.display.VirtualScreen
+import com.androiduse.log.TaskLogger
 import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.RootShell
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +94,26 @@ class MainActivity : AppCompatActivity() {
                 } finally {
                     setScreenButtonsEnabled(true)
                 }
+            }
+        }
+
+        binding.btnRunTask.setOnClickListener {
+            val screen = currentScreen
+            if (screen == null) { appendLog("请先建虚拟屏"); return@setOnClickListener }
+            val task = binding.etTask.text.toString().trim()
+            if (task.isEmpty()) { appendLog("请输入任务"); return@setOnClickListener }
+
+            lifecycleScope.launch {
+                appendLog("=== 开始任务: $task ===")
+                val client = ArkVisionClient(
+                    apiKey = BuildConfig.ARK_API_KEY,
+                    baseUrl = BuildConfig.ARK_BASE_URL,
+                    model = BuildConfig.ARK_MODEL_ID,
+                )
+                val result = AgentLoop(client, TaskLogger()).run(task, screen) { line ->
+                    runOnUiThread { appendLog(line) }
+                }
+                appendLog("=== $result ===")
             }
         }
     }

@@ -29,6 +29,20 @@
         android:layout_height="wrap_content"
         android:text="截图虚拟屏" />
 
+    <EditText
+        android:id="@+id/etTask"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="输入任务，例如：打开显示与亮度，把深色模式打开"
+        android:importantForAutofill="no"
+        android:inputType="text" />
+
+    <Button
+        android:id="@+id/btnRunTask"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="执行任务" />
+
     <ImageView
         android:id="@+id/ivPreview"
         android:layout_width="match_parent"
