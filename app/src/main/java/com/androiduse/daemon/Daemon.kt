@@ -1,5 +1,6 @@
 package com.androiduse.daemon
 
+import android.app.UiAutomation
 import android.net.LocalServerSocket
 import android.net.LocalSocket
 import android.os.HandlerThread
@@ -19,9 +20,14 @@ import java.util.concurrent.atomic.AtomicLong
  * 生命周期：空闲 [IDLE_TIMEOUT_MS] 无请求自杀，避免长期占用一个 root 进程；App 侧
  * [com.androiduse.root.DaemonClient] 在连不上时会重新拉起。
  *
- * 连接策略：**每次 dump 都 connect→读→disconnect**（spec §3 设计点 1，隐蔽性优先——
- * UiAutomation 连接期间 AccessibilityManager.isEnabled() 对全系统为 true，断开式把暴露压到
- * 单次 dump 的几百 ms）。若日后嫌延迟高，可改成任务期间保持连接。
+ * 连接策略：**首次 dump 时连一次 UiAutomation，之后复用，进程退出/空闲关闭时才 disconnect**。
+ *
+ * 本来 spec §3 设计点 1 想「每次 dump 连接即用用完即断」以求隐蔽（连接期 AccessibilityManager
+ * .isEnabled() 对全系统为 true）。但 2026-09-17 真机 E2E 实测：**同一进程里反复
+ * connect/disconnect，第二次起的 UiAutomation getWindowsOnAllDisplays 返回空**（spike 每次是
+ * 全新进程，没暴露这个问题）。所以改成持连接——牺牲一点隐蔽换正确性（暴露窗口从「单次 dump」
+ * 变成「守护进程存活期」，而它空闲 60s 就自杀，边界可接受）。连接若失效（dump 抛异常）会重置
+ * 并在下次 dump 重连。
  */
 object Daemon {
 
@@ -30,14 +36,17 @@ object Daemon {
 
     private val lastActivity = AtomicLong(System.currentTimeMillis())
 
+    // 持有的 UiAutomation 连接与承载其回调的 looper。首次 dump 建立，复用。
+    private var ua: UiAutomation? = null
+    private var callbackLooper: Looper? = null
+
     @JvmStatic
     fun main(args: Array<String>) {
         // 必须在最前面：裸 app_process 没有 main looper，UiAutomation 回调线程会 NPE 崩溃。
         Looper.prepareMainLooper()
         log("starting, uid=" + android.os.Process.myUid())
 
-        val callbackThread = HandlerThread("aud-ua").apply { start() }
-        val callbackLooper = callbackThread.looper
+        callbackLooper = HandlerThread("aud-ua").apply { start() }.looper
 
         startIdleWatchdog()
 
@@ -58,7 +67,7 @@ object Daemon {
             }
             lastActivity.set(System.currentTimeMillis())
             try {
-                handle(client, callbackLooper)
+                handle(client)
             } catch (e: Throwable) {
                 log("handle error: $e")
             } finally {
@@ -68,35 +77,50 @@ object Daemon {
         }
     }
 
-    private fun handle(client: LocalSocket, callbackLooper: Looper) {
+    private fun handle(client: LocalSocket) {
         val reader = BufferedReader(InputStreamReader(client.inputStream, StandardCharsets.UTF_8))
         val line = reader.readLine() ?: return
         val req = DumpCodec.parseRequest(line)
         val response = if (req == null) {
             DumpCodec.encodeError("bad request: ${line.take(80)}")
         } else {
-            runDump(req, callbackLooper)
+            runDump(req)
         }
         val out = client.outputStream
         out.write((response + "\n").toByteArray(StandardCharsets.UTF_8))
         out.flush()
     }
 
-    private fun runDump(req: DumpCodec.DumpRequest, callbackLooper: Looper): String {
-        val ua = try {
-            UiAutomationFactory.connect(callbackLooper)
+    /** 拿到（必要时新建）复用的 UiAutomation 连接。 */
+    private fun ensureConnected(): UiAutomation {
+        ua?.let { return it }
+        val fresh = UiAutomationFactory.connect(callbackLooper!!)
+        ua = fresh
+        log("UiAutomation connected (persistent)")
+        return fresh
+    }
+
+    /** 连接失效时重置，下次 dump 会重连。 */
+    private fun resetConnection() {
+        ua?.let { UiAutomationFactory.disconnect(it) }
+        ua = null
+    }
+
+    private fun runDump(req: DumpCodec.DumpRequest): String {
+        val automation = try {
+            ensureConnected()
         } catch (e: Throwable) {
+            resetConnection()
             return DumpCodec.encodeError("connect failed: $e")
         }
         return try {
-            // 新连接的窗口缓存靠事件填充，等它稳定再读（spike 结论：connect 后需 settle）。
-            try { ua.waitForIdle(400L, 3000L) } catch (_: Throwable) {}
-            val nodes = NodeExtractor.extractForDisplay(ua, req.displayId)
+            // 窗口缓存靠事件填充，等它稳定再读（spike 结论：读前需 settle）。
+            try { automation.waitForIdle(400L, 3000L) } catch (_: Throwable) {}
+            val nodes = NodeExtractor.extractForDisplay(automation, req.displayId)
             DumpCodec.encodeOk(req.displayId, nodes)
         } catch (e: Throwable) {
+            resetConnection() // 连接可能已死，下次重连
             DumpCodec.encodeError("dump failed: $e")
-        } finally {
-            UiAutomationFactory.disconnect(ua)
         }
     }
 
@@ -106,6 +130,7 @@ object Daemon {
                 try { Thread.sleep(5_000) } catch (_: InterruptedException) {}
                 if (System.currentTimeMillis() - lastActivity.get() > IDLE_TIMEOUT_MS) {
                     log("idle ${IDLE_TIMEOUT_MS}ms, exiting")
+                    resetConnection() // 退出前断开，撤掉「有自动化在跑」的系统状态
                     System.exit(0)
                 }
             }

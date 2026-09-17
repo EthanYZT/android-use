@@ -1,6 +1,7 @@
 package com.androiduse.agent
 
 import com.androiduse.actuation.Action
+import com.androiduse.daemon.DumpCodec.NodeRecord
 
 /**
  * 解析模型输出。纯字符串处理，不用 org.json（JVM 单测里是桩实现会抛异常）。
@@ -14,14 +15,33 @@ import com.androiduse.actuation.Action
  */
 object ResponseParser {
 
-    /** 从模型返回的正文里提取动作。解析不出来返回 null，由调用方决定重试还是中止。 */
-    fun parseAction(modelContent: String): Action? {
+    /**
+     * 从模型返回的正文里提取动作。解析不出来返回 null，由调用方决定重试还是中止。
+     *
+     * 1c：tap 支持两种形态——
+     *  - `{"action":"tap","id":N}`：点节点列表里的元素 N，坐标从该节点 bounds 中心换算（走
+     *    [nodes] + 屏幕尺寸解析）。这是首选，命中率高、零视觉误差。
+     *  - `{"action":"tap","x":..,"y":..}`：归一化坐标，用于列表里没有的元素（图标等）的视觉兜底。
+     * [nodes] 为空（守护进程读不到节点）时只有坐标形态可用，等同阶段 0 行为。
+     */
+    fun parseAction(
+        modelContent: String,
+        nodes: List<NodeRecord> = emptyList(),
+        screenW: Int = 0,
+        screenH: Int = 0,
+    ): Action? {
         val json = extractFirstJsonObject(modelContent, 0) ?: return null
         return when (field(json, "action")?.lowercase()) {
             "tap" -> {
-                val x = intField(json, "x") ?: return null
-                val y = intField(json, "y") ?: return null
-                Action.Tap(x, y)
+                val id = intField(json, "id")
+                if (id != null) {
+                    // id 不存在或 bounds 退化 → null（解析失败，让上层重试/中止）。
+                    NodeGrounding.resolveTapId(id, nodes, screenW, screenH)
+                } else {
+                    val x = intField(json, "x") ?: return null
+                    val y = intField(json, "y") ?: return null
+                    Action.Tap(x, y)
+                }
             }
             "swipe" -> {
                 val x1 = intField(json, "x1") ?: return null

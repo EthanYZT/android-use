@@ -1,6 +1,7 @@
 package com.androiduse.agent
 
 import com.androiduse.actuation.Action
+import com.androiduse.daemon.DumpCodec.NodeRecord
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,12 +27,25 @@ class ArkVisionClient(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    /** 返回 (解析出的动作, 原始正文)。动作为 null 表示解析失败，正文用于日志排查。 */
-    fun decideNextAction(task: String, history: List<String>, jpegBase64: String): Pair<Action?, String> {
+    /**
+     * 返回 (解析出的动作, 原始正文)。动作为 null 表示解析失败，正文用于日志排查。
+     *
+     * 1c：传入 [nodes]（守护进程读到的节点，可空）+ 屏幕像素尺寸。节点列表进提示词、并用于把
+     * 模型选中的 id 解析成坐标。nodes 为空即退化为阶段 0 的「仅截图」。
+     */
+    fun decideNextAction(
+        task: String,
+        history: List<String>,
+        jpegBase64: String,
+        nodes: List<NodeRecord> = emptyList(),
+        screenW: Int = 0,
+        screenH: Int = 0,
+    ): Pair<Action?, String> {
         if (apiKey.isBlank() || model.isBlank()) {
             return null to "未配置 ark.apiKey / ark.modelId，请检查 local.properties"
         }
-        val body = PromptBuilder.buildRequestBody(model, task, history, jpegBase64)
+        val nodesBlock = NodeGrounding.promptBlock(nodes, screenW, screenH)
+        val body = PromptBuilder.buildRequestBody(model, task, history, jpegBase64, nodesBlock)
         val req = Request.Builder()
             .url("$baseUrl/chat/completions")
             .addHeader("Authorization", "Bearer $apiKey")
@@ -45,7 +59,7 @@ class ArkVisionClient(
                 if (!resp.isSuccessful) return null to "HTTP ${resp.code}: ${text.take(300)}"
                 val content = ResponseParser.extractContent(text)
                     ?: return null to "响应里没有 content: ${text.take(300)}"
-                ResponseParser.parseAction(content) to content
+                ResponseParser.parseAction(content, nodes, screenW, screenH) to content
             }
         } catch (e: Exception) {
             null to "请求异常: ${e.message}"

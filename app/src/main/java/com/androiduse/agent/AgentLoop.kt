@@ -2,9 +2,11 @@ package com.androiduse.agent
 
 import com.androiduse.actuation.Action
 import com.androiduse.actuation.Injector
+import com.androiduse.daemon.DumpCodec
 import com.androiduse.display.VirtualScreen
 import com.androiduse.log.TaskLogger
 import com.androiduse.perception.ScreenCapture
+import com.androiduse.root.DaemonClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -41,7 +43,19 @@ class AgentLoop(
             val frame = ScreenCapture.captureAsJpegBase64(screen)
                 ?: return@withContext finish(step, System.currentTimeMillis() - t0, "截图失败", onProgress)
 
-            val (action, raw) = client.decideNextAction(task, history, frame)
+            // 1c：读节点树（虚拟屏）。读不到不阻断——退化为「仅截图」，模型凭视觉给坐标（§5.1 ③级）。
+            val nodes = when (val dump = DaemonClient.dump(screen.logicalDisplayId)) {
+                is DumpCodec.DumpResult.Ok -> dump.nodes
+                is DumpCodec.DumpResult.Err -> {
+                    onProgress(logger.step(step, "NodeDumpFailed", "node", 0, dump.message.take(120)))
+                    emptyList()
+                }
+            }
+            onProgress(logger.step(step, "NodeDump", "node", 0, "nodes=${nodes.size}"))
+
+            val (action, raw) = client.decideNextAction(
+                task, history, frame, nodes, screen.widthPx, screen.heightPx,
+            )
             // F-8：原始响应是阶段 1 grounding 排障最有价值的语料——一次"解析成功但点错
             // 位置"的 tap，事后只能靠这份原始文本复盘。之前只在解析失败时记录，成功路径
             // 完全不可恢复。这里无论成败都记一条并推给 onProgress，进同一份可查的日志，

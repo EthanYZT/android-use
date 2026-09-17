@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import com.androiduse.BuildConfig
 import com.androiduse.agent.AgentLoop
 import com.androiduse.agent.ArkVisionClient
+import com.androiduse.root.DaemonClient
 import com.androiduse.databinding.ActivityMainBinding
 import com.androiduse.display.VirtualDisplayManager
 import com.androiduse.display.VirtualScreen
@@ -27,6 +28,8 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         ScreenCapture.cacheDir = cacheDir
+        // 守护进程复用本 App 的 APK 作 classpath（见 DaemonClient）。sourceDir 是 App 自控路径。
+        DaemonClient.apkPath = applicationInfo.sourceDir
 
         binding.tvLog.movementMethod = ScrollingMovementMethod()
 
@@ -118,6 +121,7 @@ class MainActivity : AppCompatActivity() {
                         model = BuildConfig.ARK_MODEL_ID,
                     )
                     val result = AgentLoop(client, TaskLogger()).run(task, screen) { line ->
+                        android.util.Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
                         runOnUiThread { appendLog(line) }
                     }
                     appendLog("=== $result ===")
