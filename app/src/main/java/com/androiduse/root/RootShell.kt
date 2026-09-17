@@ -57,6 +57,29 @@ object RootShell {
     internal fun suArgv(argv: List<String>): List<String> = listOf("su", "root") + argv
 
     /**
+     * 以 root 启动一个**长驻**进程并立即返回，不等它结束（用于拉起守护进程）。
+     *
+     * 与 [execArgv] 的区别：那个会 `waitFor` 直到进程结束，只适合短命令；长驻进程用它会一直
+     * 阻塞。这里 fire-and-forget：`start()` 后不 `waitFor`，并把子进程的 stdout/stderr
+     * **丢弃**（`Redirect.DISCARD`）——否则守护进程一旦往 stdio 写东西、管道缓冲区写满，会
+     * 阻塞在 write() 上（就是 RootShell 大输出死锁那个坑的翻版）。
+     *
+     * argv 语义同 [execArgv]（`su root <argv>`，直接 execve、不过 shell）。返回是否成功发起
+     * （`start()` 未抛异常）；发起成功不代表进程一定活着，调用方要用别的手段确认（如连 socket）。
+     */
+    fun execArgvAsync(argv: List<String>): Boolean =
+        try {
+            val devNull = java.io.File("/dev/null")
+            ProcessBuilder(suArgv(argv))
+                .redirectOutput(devNull)
+                .redirectErrorStream(true) // stderr 并入 stdout，一起进 /dev/null
+                .start()
+            true
+        } catch (_: Exception) {
+            false
+        }
+
+    /**
      * 真正跑进程的核心逻辑，接受任意 argv。生产代码通过 [exec]（拼 `su -c <string>`）或 [execArgv]（`su -c` + 固定包裹 + argv）调用；
      * 这里单独拆出来是为了让单测能在没有 su / 没有真机的情况下，用普通 shell 命令
      * 驱动同一套“并发排空 stdout/stderr 再 waitFor”的逻辑。
