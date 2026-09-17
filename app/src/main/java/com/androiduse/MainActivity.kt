@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
                 setScreenButtonsEnabled(false)
                 try {
                     val destroyed = withContext(Dispatchers.IO) { VirtualDisplayManager.destroy() }
+                    if (destroyed) currentScreen = null
                     appendLog(if (destroyed) "已销毁虚拟屏" else "销毁虚拟屏失败")
                 } finally {
                     setScreenButtonsEnabled(true)
