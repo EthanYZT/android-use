@@ -8,6 +8,13 @@ package com.androiduse.agent
  */
 object PromptBuilder {
 
+    /**
+     * 故意不提供 {"action":"home"}：2026-09-17 实测 `input -d <虚拟屏id> keyevent 3`
+     * 不会停留在目标屏，会被系统路由到物理屏（display 0）的桌面 Launcher，直接违反
+     * "Agent 不抢占物理前台"的验收要求。在有真正按屏隔离的 Home 之前，不给模型这个
+     * 选项——`Action.Home` 本身和 `ResponseParser` 的解析仍保留（AgentLoop 里有一层
+     * 兜底拒绝，见 AgentLoop.kt 对 Action.Home 的处理），只是这里不再主动提供。
+     */
     fun systemPrompt(): String = """
         你是一个安卓手机操作助手。你会看到当前屏幕截图和一个任务目标，你要决定下一步该做什么。
 
@@ -18,7 +25,6 @@ object PromptBuilder {
         {"action":"tap","x":<0-1000>,"y":<0-1000>}
         {"action":"swipe","x1":<0-1000>,"y1":<0-1000>,"x2":<0-1000>,"y2":<0-1000>,"duration":<毫秒>}
         {"action":"back"}
-        {"action":"home"}
         {"action":"wait","ms":<毫秒>}
         {"action":"finish","summary":"<一句话说明任务结果>"}
 

@@ -104,25 +104,36 @@ class MainActivity : AppCompatActivity() {
             if (task.isEmpty()) { appendLog("请输入任务"); return@setOnClickListener }
 
             lifecycleScope.launch {
-                appendLog("=== 开始任务: $task ===")
-                val client = ArkVisionClient(
-                    apiKey = BuildConfig.ARK_API_KEY,
-                    baseUrl = BuildConfig.ARK_BASE_URL,
-                    model = BuildConfig.ARK_MODEL_ID,
-                )
-                val result = AgentLoop(client, TaskLogger()).run(task, screen) { line ->
-                    runOnUiThread { appendLog(line) }
+                // 和建屏/销屏/截图一样禁用按钮：btnRunTask 自己也在列表里，防止重复点击
+                // 开出第二个并发的 AgentLoop（两个循环的日志会交错写进同一个 tvLog，
+                // Injector.perform 之间也没有互斥）；btnDestroyScreen 也被禁用，防止
+                // 任务跑到一半时虚拟屏被销毁，循环继续对着已经不存在的 logicalDisplayId
+                // 发命令。
+                setScreenButtonsEnabled(false)
+                try {
+                    appendLog("=== 开始任务: $task ===")
+                    val client = ArkVisionClient(
+                        apiKey = BuildConfig.ARK_API_KEY,
+                        baseUrl = BuildConfig.ARK_BASE_URL,
+                        model = BuildConfig.ARK_MODEL_ID,
+                    )
+                    val result = AgentLoop(client, TaskLogger()).run(task, screen) { line ->
+                        runOnUiThread { appendLog(line) }
+                    }
+                    appendLog("=== $result ===")
+                } finally {
+                    setScreenButtonsEnabled(true)
                 }
-                appendLog("=== $result ===")
             }
         }
     }
 
-    /** 建屏/销屏/截图操作进行中禁用相关按钮，避免用户并发点击触发重叠调用。 */
+    /** 建屏/销屏/截图/执行任务操作进行中禁用相关按钮，避免用户并发点击触发重叠调用。 */
     private fun setScreenButtonsEnabled(enabled: Boolean) {
         binding.btnCreateScreen.isEnabled = enabled
         binding.btnDestroyScreen.isEnabled = enabled
         binding.btnCapture.isEnabled = enabled
+        binding.btnRunTask.isEnabled = enabled
     }
 
     private fun appendLog(line: String) {
