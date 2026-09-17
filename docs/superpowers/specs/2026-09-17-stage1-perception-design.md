@@ -104,3 +104,24 @@ App 用 `execArgv` 通过 root 启动 `app_process` 守护进程（自带 dex/ja
 
 **结论**：1b 走 root `app_process` + 临时 UiAutomation 成立，可开始写守护进程。probe 源码见
 scratchpad（未入库，throwaway）。
+
+## 5. 1c 结论（2026-09-17 真机 E2E 通过）
+
+节点 grounding 接入 agent 循环（混合方案：截图 + 节点列表）。新增 `NodeGrounding`（节点像素
+bounds→归一化中心 / 提示词列表经 `UntrustedText` / 按 id 解析成 `Action.Tap`，退化 bounds 跳过），
+改 `PromptBuilder`（tap-by-id 首选、x/y 兜底）、`ResponseParser`（`{"action":"tap","id":N}`）、
+`ArkVisionClient`/`AgentLoop`（每步 dump 传入，读不到退化为仅截图）。
+
+**E2E「打开显示与亮度」两步完成**：dump 40 节点 → 模型 `tap id=32` → 命中显示与亮度行 →
+新页 dump 26 节点 → finish（总结准确）。模型两次都主动用 id。补完了阶段 0 未跑完的多步 E2E。
+
+**关键修正：守护进程从「每次 dump connect/disconnect」改为「持连接」。**
+- 原设计（spec §3 设计点 1）想连接即用用完即断以求隐蔽。**真机 E2E 推翻了它**：同一守护进程内
+  第二次起的 UiAutomation `getWindowsOnAllDisplays` 返回空（step1 nodes=40，step2+ nodes=0）。
+  spike 每次是全新进程，没暴露这个坑。
+- 现方案：首次 dump 建连、之后复用，空闲 60s / 退出时才 disconnect，dump 抛异常则重置下次重连。
+- 代价：暴露窗口从「单次 dump」变成「守护进程存活期（空闲即死）」，隐蔽性略降但换来正确性。
+  §8.4 的锁屏门控仍是主要防线。
+
+**阶段 1 剩余**：1d（OCR 兜底，ML Kit 打包）、1e（真 headless 屏 ADD_TRUSTED_DISPLAY）。
+DESIGN §9 阶段 1 验收（5 个系统 App 命中率 >90%）目前只在设置 1 个 App 上验过，待铺开。
