@@ -6,6 +6,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.androiduse.databinding.ActivityMainBinding
 import com.androiduse.display.VirtualDisplayManager
+import com.androiduse.display.VirtualScreen
+import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.RootShell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -14,11 +16,13 @@ import kotlinx.coroutines.withContext
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private var currentScreen: VirtualScreen? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        ScreenCapture.cacheDir = cacheDir
 
         binding.tvLog.movementMethod = ScrollingMovementMethod()
 
@@ -40,6 +44,7 @@ class MainActivity : AppCompatActivity() {
                         val launched = withContext(Dispatchers.IO) {
                             VirtualDisplayManager.launchIntentAction("android.settings.SETTINGS", screen)
                         }
+                        currentScreen = screen
                         appendLog(
                             "建屏成功 logicalId=${screen.logicalDisplayId} sfId=${screen.surfaceFlingerId.toULong()} " +
                                 "启动=${if (launched) "成功" else "失败"}"
@@ -62,12 +67,37 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        binding.btnCapture.setOnClickListener {
+            val screen = currentScreen
+            if (screen == null) {
+                appendLog("还没建屏")
+                return@setOnClickListener
+            }
+            lifecycleScope.launch {
+                setScreenButtonsEnabled(false)
+                try {
+                    val t0 = System.currentTimeMillis()
+                    val bmp = withContext(Dispatchers.IO) { ScreenCapture.capture(screen) }
+                    val cost = System.currentTimeMillis() - t0
+                    if (bmp == null) {
+                        appendLog("截图失败")
+                    } else {
+                        binding.ivPreview.setImageBitmap(bmp)
+                        appendLog("截图成功 ${bmp.width}x${bmp.height} 耗时 ${cost}ms")
+                    }
+                } finally {
+                    setScreenButtonsEnabled(true)
+                }
+            }
+        }
     }
 
-    /** 建屏/销屏操作进行中禁用两个按钮，避免用户并发点击触发重叠调用。 */
+    /** 建屏/销屏/截图操作进行中禁用相关按钮，避免用户并发点击触发重叠调用。 */
     private fun setScreenButtonsEnabled(enabled: Boolean) {
         binding.btnCreateScreen.isEnabled = enabled
         binding.btnDestroyScreen.isEnabled = enabled
+        binding.btnCapture.isEnabled = enabled
     }
 
     private fun appendLog(line: String) {
