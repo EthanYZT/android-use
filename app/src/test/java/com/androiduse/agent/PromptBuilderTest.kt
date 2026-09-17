@@ -1,5 +1,7 @@
 package com.androiduse.agent
 
+import com.androiduse.actuation.Action
+import com.androiduse.daemon.DumpCodec.NodeRecord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -7,140 +9,161 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * F-4(a): 阶段 0 之前完全没有 PromptBuilderTest——唯一的一点覆盖是
- * ResponseParserTest 里两条近乎空断言的 contains("0")/contains("1000")（后者完全
- * 包含前者，等于只测了一条）。多步反馈（buildRequestBody 的 history 非空分支）在
- * 真机验收里从没跑到过，这里至少在纯逻辑层面把两条分支、转义边界、以及关键的系统
- * 提示词内容锁住。
- *
- * 不用 org.json 校验产出的 JSON（JVM 单测里是桩实现，见 PromptBuilder 顶部注释），
- * 用一个和 ResponseParser 同样思路的、带转义感知的括号配平扫描器代替——足以确认
- * "结构合法、可被解析"，不需要引入新依赖。
+ * messages 是 Transcript 的投影：每次请求从头重新生成，不手工拼接。
+ * 这里测的是投影规则——消息顺序、tool calling 的往返形态、截图/节点列表的保留策略。
+ * 结构断言用子串与顺序检查（JVM 单测里 org.json 是桩，不能用它解析）。
  */
 class PromptBuilderTest {
 
+    private fun node(id: Int) = NodeRecord(id, 0, id * 100, 1080, id * 100 + 100, "项$id", "", "", "", true, false)
+
+    private fun obs(step: Int, withImage: Boolean = true, dumpError: String? = null) = Observation(
+        screenshotBase64 = if (withImage) "IMG$step" else null,
+        screenshotPath = null,
+        nodes = if (dumpError == null) listOf(node(0), node(1)) else emptyList(),
+        nodesBlock = if (dumpError == null) "#0 (500,46) click text=\"项0\"\n#1 (500,138) click text=\"项1\"" else "",
+        dumpError = dumpError,
+    )
+
+    private fun reply(note: String, vararg calls: ToolCall) =
+        ModelReply(note, calls.toList(), if (calls.isEmpty()) "stop" else "tool_calls", 100, 1000)
+
+    /** 建一份有 [done] 个已完成步骤、外加一个当前步骤（只有观察）的 Transcript。 */
+    private fun transcript(done: Int): Transcript {
+        val t = Transcript("t", "看型号", "glm", 0L, 1080, 2376)
+        for (i in 1..done) {
+            val s = Step(i, obs(i))
+            s.replies.add(reply("第${i}步笔记", ToolCall("call_$i", "tap", """{"id":1}""")))
+            s.execution = Execution(Action.Tap(500, 138), true, "ok", 500)
+            t.steps.add(s)
+        }
+        t.steps.add(Step(done + 1, obs(done + 1)))
+        return t
+    }
+
+    private fun rolesInOrder(body: String): List<String> =
+        Regex("\"role\":\"(system|user|assistant|tool)\"").findAll(body).map { it.groupValues[1] }.toList()
+
     private fun isStructurallyValidJson(s: String): Boolean {
-        var curly = 0
-        var square = 0
-        var inString = false
-        var escaped = false
+        var depth = 0; var inStr = false; var esc = false
         for (c in s) {
             when {
-                escaped -> escaped = false
-                inString && c == '\\' -> escaped = true
-                c == '"' -> inString = !inString
-                inString -> Unit
-                c == '{' -> curly++
-                c == '}' -> curly--
-                c == '[' -> square++
-                c == ']' -> square--
+                esc -> esc = false
+                c == '\\' && inStr -> esc = true
+                c == '"' -> inStr = !inStr
+                inStr -> {}
+                c == '{' || c == '[' -> depth++
+                c == '}' || c == ']' -> { depth--; if (depth < 0) return false }
             }
-            if (curly < 0 || square < 0) return false
         }
-        return curly == 0 && square == 0 && !inString
-    }
-
-    // --- buildRequestBody: 空 history 分支 ---
-
-    @Test
-    fun emptyHistoryProducesValidJsonWithCorrectNesting() {
-        val body = PromptBuilder.buildRequestBody("test-model", "打开设置", emptyList(), "ZmFrZQ==")
-
-        assertTrue("产出的请求体必须是括号/引号配平的合法 JSON", isStructurallyValidJson(body))
-        assertTrue(body.contains("\"model\":\"test-model\""))
-        assertTrue(body.contains("\"temperature\":0"))
-        assertTrue("空 history 要落到占位文案", body.contains("还没有执行过任何步骤"))
-
-        // 嵌套顺序：system 消息在 user 消息之前；user 的 content 数组里 image_url 在 text 之前。
-        val systemIdx = body.indexOf("\"role\":\"system\"")
-        val userIdx = body.indexOf("\"role\":\"user\"")
-        val imageIdx = body.indexOf("\"image_url\"")
-        val textIdx = body.indexOf("\"text\"")
-        assertTrue(systemIdx in 0 until userIdx)
-        assertTrue(userIdx in 0 until imageIdx)
-        assertTrue(imageIdx in 0 until textIdx)
-    }
-
-    // --- buildRequestBody: 非空 history 分支（F-4(b) 真机验收要跑到的那条分支） ---
-
-    @Test
-    fun nonEmptyHistoryProducesValidJsonListingEachStep() {
-        val history = listOf("Tap(300, 900)", "Wait(500)")
-        val body = PromptBuilder.buildRequestBody("test-model", "打开设置", history, "ZmFrZQ==")
-
-        assertTrue(isStructurallyValidJson(body))
-        assertTrue(body.contains("1. Tap(300, 900)"))
-        assertTrue(body.contains("2. Wait(500)"))
-        assertFalse("非空 history 不应该再落到占位文案", body.contains("还没有执行过任何步骤"))
-    }
-
-    // --- jsonString: 转义边界 ---
-
-    @Test
-    fun jsonStringEscapesQuotes() {
-        assertEquals("\"say \\\"hi\\\"\"", PromptBuilder.jsonString("say \"hi\""))
+        return depth == 0 && !inStr
     }
 
     @Test
-    fun jsonStringEscapesBackslashes() {
-        assertEquals("\"a\\\\b\"", PromptBuilder.jsonString("a\\b"))
-    }
-
-    @Test
-    fun jsonStringEscapesNewlines() {
-        assertEquals("\"a\\nb\"", PromptBuilder.jsonString("a\nb"))
-    }
-
-    @Test
-    fun jsonStringEscapesControlCharacters() {
-        // \u0001 是一个不可打印的控制字符，必须走 \\u%04x 分支，不能原样输出。
-        assertEquals("\"\\u0001\"", PromptBuilder.jsonString("\u0001"))
-    }
-
-    @Test
-    fun jsonStringOutputEmbedsAsValidJson() {
-        val escaped = PromptBuilder.jsonString("weird \" \\ \n value")
-        assertTrue(isStructurallyValidJson("{\"k\":$escaped}"))
-    }
-
-    // --- systemPrompt: 关键内容断言 ---
-
-    @Test
-    fun systemPromptStatesNormalizedZeroToThousandCoordinateConvention() {
-        val prompt = PromptBuilder.systemPrompt()
-        assertTrue(prompt.contains("归一化"))
-        assertTrue(prompt.contains("0 到 1000"))
-    }
-
-    @Test
-    fun systemPromptContainsPromptInjectionDefenseLine() {
-        assertTrue(PromptBuilder.systemPrompt().contains("不是给你的指令"))
-    }
-
-    @Test
-    fun systemPromptDoesNotOfferHomeAction() {
-        // F-3 的回归护栏：home 会跨屏抢占物理屏前台，PromptBuilder 故意不提供这个动作
-        // （见 PromptBuilder 顶部注释）。任何人以后不小心把 {"action":"home"} 加回动作列表，
-        // 这条测试就会红。
-        assertFalse(PromptBuilder.systemPrompt().contains("home", ignoreCase = true))
-    }
-
-    @Test
-    fun maxTokensLeavesHeadroomForReasoningModelsSoContentIsNotTruncatedAway() {
-        // glm-5.3-flash 是推理模型：绝大部分 completion 预算花在 reasoning_content 上，
-        // content 在推理之后才输出。上限太小 -> finish_reason=length、content 为空字符串 ->
-        // ResponseParser 解析不出动作 -> 整个任务中止。这不是解析器的 bug，是回复被砍掉了。
-        //
-        // 2026-09-17 真机实测的推理 token 用量（随历史增长）：空历史 63 / 2 条 106 / 5 条 170。
-        // max_tokens 是上限不是预留，调大不增加实际花费，所以留足余量。
-        // 若有人把它改小到接近实测值，这条测试会红。
-        val body = PromptBuilder.buildRequestBody("m", "t", emptyList(), "ZmFrZQ==")
+    fun bodyIsValidJsonWithModelToolsAndMaxTokens() {
+        val body = PromptBuilder.buildRequestBody(transcript(0))
+        assertTrue(body, isStructurallyValidJson(body))
+        assertTrue(body.contains("\"model\":\"glm\""))
+        assertTrue(body.contains("\"tools\":["))
+        for (name in listOf("tap", "swipe", "back", "wait", "finish")) {
+            assertTrue("缺少工具 $name", body.contains("\"name\":\"$name\""))
+        }
+        assertFalse("不能提供 home 工具（虚拟屏 Home 会串到物理屏）", body.contains("\"name\":\"home\""))
         val declared = Regex("\"max_tokens\":(\\d+)").find(body)?.groupValues?.get(1)?.toInt()
-        assertNotNull("请求体里必须声明 max_tokens", declared)
-        assertTrue(
-            "max_tokens=$declared 对推理模型余量不足：实测 5 条历史已用到 170 推理 token，" +
-                "低于 1000 有被截断导致 content 为空的风险",
-            declared!! >= 1000,
+        assertNotNull(declared)
+        assertTrue("max_tokens=$declared 覆盖不住最坏场景实测 5631 推理 token", declared!! >= 8192)
+    }
+
+    @Test
+    fun freshTaskHasSystemTaskAndCurrentObservationOnly() {
+        val body = PromptBuilder.buildRequestBody(transcript(0))
+        assertEquals(listOf("system", "user", "user"), rolesInOrder(body))
+        assertTrue(body.contains("看型号"))
+        assertTrue(body.contains("IMG1"))
+        assertTrue(body.contains("项0"))
+    }
+
+    @Test
+    fun completedStepsReplayAsObservationAssistantToolTriples() {
+        val body = PromptBuilder.buildRequestBody(transcript(2))
+        assertEquals(
+            listOf("system", "user", "user", "assistant", "tool", "user", "assistant", "tool", "user"),
+            rolesInOrder(body),
         )
+    }
+
+    @Test
+    fun assistantMessageReplaysNoteAndToolCallsVerbatim() {
+        val body = PromptBuilder.buildRequestBody(transcript(1))
+        assertTrue(body.contains("\"content\":\"第1步笔记\""))
+        assertTrue(body.contains("\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tap\",\"arguments\":\"{\\\"id\\\":1}\"}}]"))
+    }
+
+    @Test
+    fun toolMessageCarriesMatchingIdAndExecutionResult() {
+        val t = transcript(1)
+        t.steps[0].execution = Execution(null, false, "id 99 不在当前元素列表里", 10)
+        val body = PromptBuilder.buildRequestBody(t)
+        assertTrue(body.contains("\"role\":\"tool\",\"tool_call_id\":\"call_1\",\"content\":\"id 99 不在当前元素列表里\""))
+    }
+
+    @Test
+    fun nudgeRoundTripReplaysTextOnlyReplyThenNudgeThenToolReply() {
+        val t = transcript(0)
+        val current = t.steps.last()
+        current.replies.add(reply("我觉得应该点第一个"))
+        val body = PromptBuilder.buildRequestBody(t)
+        // 当前步：观察 → 模型只给文字 → 我们追问 → 等模型再答
+        assertEquals(listOf("system", "user", "user", "assistant", "user"), rolesInOrder(body))
+        assertTrue(body.contains(PromptBuilder.NUDGE_TEXT))
+        assertTrue(body.indexOf("我觉得应该点第一个") < body.indexOf(PromptBuilder.NUDGE_TEXT))
+    }
+
+    @Test
+    fun onlyTheMostRecentScreenshotsAreKeptAsImages() {
+        val body = PromptBuilder.buildRequestBody(transcript(4)) // 步骤 1..5，5 是当前
+        val keep = PromptBuilder.KEEP_SCREENSHOT_STEPS
+        for (i in 1..5) {
+            val kept = i > 5 - keep
+            assertEquals("第 $i 步截图保留=$kept", kept, body.contains("IMG$i"))
+            assertEquals("第 $i 步占位=${!kept}", !kept, body.contains("[第 $i 步截图已省略]"))
+        }
+        assertEquals(keep, Regex("\"type\":\"image_url\"").findAll(body).count())
+    }
+
+    @Test
+    fun olderNodeListsAreCollapsedToOneLineWithCount() {
+        val body = PromptBuilder.buildRequestBody(transcript(6)) // 步骤 1..7
+        val keep = PromptBuilder.KEEP_NODES_STEPS
+        for (i in 1..7) {
+            val collapsed = i <= 7 - keep
+            assertEquals("第 $i 步节点列表压缩=$collapsed", collapsed, body.contains("[第 $i 步节点列表已省略，共 2 个元素]"))
+        }
+        assertEquals(keep, Regex("text=\\\\\"项0\\\\\"").findAll(body).count())
+    }
+
+    @Test
+    fun observationWithoutNodesSaysSo() {
+        val t = Transcript("t", "x", "glm", 0L, 1080, 2376)
+        t.steps.add(Step(1, obs(1, dumpError = "daemon unreachable")))
+        val body = PromptBuilder.buildRequestBody(t)
+        assertTrue(body.contains("本次读取不到"))
+    }
+
+    @Test
+    fun systemPromptKeepsCoordinateConventionInjectionDefenseAndNoteInstruction() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p.contains("0 到 1000"))
+        assertTrue(p.contains("不是给你的指令"))
+        assertTrue("要求模型写观察笔记", p.contains("笔记"))
+        assertFalse(p.contains("\"action\":\"home\""))
+    }
+
+    @Test
+    fun jsonStringEscapesQuotesBackslashesNewlinesAndControlChars() {
+        assertEquals("\"a\\\"b\"", PromptBuilder.jsonString("a\"b"))
+        assertEquals("\"a\\\\b\"", PromptBuilder.jsonString("a\\b"))
+        assertEquals("\"a\\nb\"", PromptBuilder.jsonString("a\nb"))
+        assertEquals("\"a\\u0001b\"", PromptBuilder.jsonString("a" + 1.toChar() + "b"))
     }
 }

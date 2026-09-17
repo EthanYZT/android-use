@@ -6,12 +6,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.androiduse.BuildConfig
 import com.androiduse.agent.AgentLoop
-import com.androiduse.agent.ArkVisionClient
+import com.androiduse.agent.ArkChatClient
 import com.androiduse.root.DaemonClient
 import com.androiduse.databinding.ActivityMainBinding
 import com.androiduse.display.VirtualDisplayManager
 import com.androiduse.display.VirtualScreen
-import com.androiduse.log.TaskLogger
+import com.androiduse.log.TranscriptStore
+import java.io.File
 import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.RootShell
 import kotlinx.coroutines.Dispatchers
@@ -115,16 +116,15 @@ class MainActivity : AppCompatActivity() {
                 setScreenButtonsEnabled(false)
                 try {
                     appendLog("=== 开始任务: $task ===")
-                    val client = ArkVisionClient(
-                        apiKey = BuildConfig.ARK_API_KEY,
-                        baseUrl = BuildConfig.ARK_BASE_URL,
-                        model = BuildConfig.ARK_MODEL_ID,
-                    )
-                    val result = AgentLoop(client, TaskLogger()).run(task, screen) { line ->
-                        android.util.Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
-                        runOnUiThread { appendLog(line) }
-                    }
-                    appendLog("=== $result ===")
+                    val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
+                    val store = TranscriptStore(File(filesDir, "transcripts"))
+                    val outcome = AgentLoop(client, AndroidEnvironment(screen), BuildConfig.ARK_MODEL_ID, store)
+                        .run(task) { line ->
+                            android.util.Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
+                            runOnUiThread { appendLog(line) }
+                        }
+                    appendLog("=== ${if (outcome.finished) "任务完成: " else ""}${outcome.summary} ===")
+                    appendLog("日志: ${File(filesDir, "transcripts/${outcome.transcript.taskId}").absolutePath}")
                 } finally {
                     setScreenButtonsEnabled(true)
                 }

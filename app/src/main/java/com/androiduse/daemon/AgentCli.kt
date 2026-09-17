@@ -2,9 +2,10 @@ package com.androiduse.daemon
 
 import com.androiduse.BuildConfig
 import com.androiduse.agent.AgentLoop
-import com.androiduse.agent.ArkVisionClient
+import com.androiduse.agent.ArkChatClient
+import com.androiduse.AndroidEnvironment
 import com.androiduse.display.VirtualDisplayManager
-import com.androiduse.log.TaskLogger
+import com.androiduse.log.TranscriptStore
 import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.DaemonClient
 import kotlinx.coroutines.runBlocking
@@ -34,12 +35,15 @@ object AgentCli {
         VirtualDisplayManager.launchIntentAction("android.settings.SETTINGS", screen)
         Thread.sleep(2500)
 
-        val client = ArkVisionClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL, BuildConfig.ARK_MODEL_ID)
+        val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
+        val store = TranscriptStore(File("/data/local/tmp/androiduse_transcripts"))
         try {
-            val result = runBlocking {
-                AgentLoop(client, TaskLogger()).run(task, screen, maxSteps = maxSteps) { println(it) }
+            val outcome = runBlocking {
+                AgentLoop(client, AndroidEnvironment(screen), BuildConfig.ARK_MODEL_ID, store)
+                    .run(task, maxSteps = maxSteps) { println(it) }
             }
-            println("RESULT: $result")
+            println("RESULT: finished=${outcome.finished} ${outcome.summary}")
+            println("TRANSCRIPT: /data/local/tmp/androiduse_transcripts/${outcome.transcript.taskId}/transcript.jsonl")
         } finally {
             VirtualDisplayManager.destroy()
         }

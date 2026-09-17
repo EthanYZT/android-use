@@ -59,7 +59,26 @@ object ResponseParser {
     }
 
     /**
-     * 从方舟接口响应里取出 choices[0].message.content。
+     * 一次模型回复里我们关心的三样东西：正文、结束原因、推理 token 数。
+     *
+     * 2026-09-17 真机复现：推理模型偶发把整个 max_tokens 烧在 reasoning_content 上，此时
+     * finish_reason=length、content 为空串。只把 content 交给上层，"被截断"和"解析不出"
+     * 长得一模一样，排障会被带偏（记忆里的"坑 2"），所以把后两项一起取出来。
+     * finishReason / reasoningTokens 缺失时为 null（旧响应形态、或接口不返回 usage）。
+     */
+    data class Completion(
+        val content: String,
+        val finishReason: String?,
+        val reasoningTokens: Int?,
+        val toolCalls: List<ToolCall> = emptyList(),
+    ) {
+        /** 回复被 max_tokens 砍断（正文很可能不完整甚至为空）。 */
+        val truncated: Boolean get() = finishReason == "length"
+    }
+
+    /**
+     * 从方舟接口响应里取出 choices[0].message.content，连同 choices[0].finish_reason 和
+     * usage.completion_tokens_details.reasoning_tokens。没有 content 返回 null。
      *
      * 不是找整份响应里第一次出现的 "content" 子串：这是个推理模型，同一个
      * message 对象里还会有 reasoning_content / encrypted_content 等字段，
@@ -67,7 +86,7 @@ object ResponseParser {
      * 取它的 message 对象，再取 message 自己的 content 字段——而不是依赖
      * 字段在文本里出现的先后顺序。
      */
-    fun extractContent(apiResponseJson: String): String? {
+    fun extractCompletion(apiResponseJson: String): Completion? {
         val choicesValueStart = valueStartOf(apiResponseJson, "choices", 0) ?: return null
         var i = choicesValueStart
         while (i < apiResponseJson.length && apiResponseJson[i] != '{') {
@@ -82,9 +101,49 @@ object ResponseParser {
         val message = extractFirstJsonObject(firstChoice, messageValueStart) ?: return null
 
         val contentValueStart = valueStartOf(message, "content", 0) ?: return null
-        if (contentValueStart >= message.length || message[contentValueStart] != '"') return null
-        return readJsonStringAt(message, contentValueStart)
+        if (contentValueStart >= message.length) return null
+        val toolCalls = extractToolCalls(message)
+        val content = when {
+            message[contentValueStart] == '"' -> readJsonStringAt(message, contentValueStart)
+            // 只发 tool_calls 时 content 常是 null；有 tool_calls 就不算"没有 content"。
+            message.startsWith("null", contentValueStart) && toolCalls.isNotEmpty() -> ""
+            else -> return null
+        }
+
+        // finish_reason 是 choice 的字段（与 message 平级）；reasoning_tokens 在顶层 usage 里，
+        // 同样逐层定位，不在整份文本里裸搜。
+        val finishReason = field(firstChoice, "finish_reason")
+        val reasoningTokens = valueStartOf(apiResponseJson, "usage", 0)
+            ?.let { extractFirstJsonObject(apiResponseJson, it) }
+            ?.let { usage -> valueStartOf(usage, "completion_tokens_details", 0)?.let { extractFirstJsonObject(usage, it) } }
+            ?.let { intField(it, "reasoning_tokens") }
+        return Completion(content, finishReason, reasoningTokens, toolCalls)
     }
+
+    /** message.tool_calls[*] → [ToolCall]。没有该字段返回空列表。 */
+    private fun extractToolCalls(message: String): List<ToolCall> {
+        val arrStart = valueStartOf(message, "tool_calls", 0) ?: return emptyList()
+        if (arrStart >= message.length || message[arrStart] != '[') return emptyList()
+        val out = ArrayList<ToolCall>()
+        var i = arrStart + 1
+        while (i < message.length) {
+            val c = message[i]
+            if (c == ']') break
+            if (c == '{') {
+                val obj = extractFirstJsonObject(message, i) ?: break
+                val fnStart = valueStartOf(obj, "function", 0)
+                val fn = fnStart?.let { if (it < obj.length && obj[it] == '{') extractFirstJsonObject(obj, it) else null }
+                val name = fn?.let { field(it, "name") }
+                val args = fn?.let { field(it, "arguments") }
+                if (name != null) out.add(ToolCall(field(obj, "id") ?: "", name, args ?: "{}"))
+                i += obj.length
+            } else i++
+        }
+        return out
+    }
+
+    /** 只要正文。等价于 [extractCompletion] 的 content。 */
+    fun extractContent(apiResponseJson: String): String? = extractCompletion(apiResponseJson)?.content
 
     /** 抓出从 fromIndex 起第一个 {...} 块，容忍前面有解释文字或 markdown fence。 */
     private fun extractFirstJsonObject(text: String, fromIndex: Int): String? {
@@ -113,14 +172,14 @@ object ResponseParser {
      * 读字段的值，处理转义。命中的必须是锚定的真 key——字符串值里恰好出现的
      * 同名片段（比如屏幕文字里的 "action":"tap"）不会被当成字段。
      */
-    private fun field(json: String, name: String): String? {
+    internal fun field(json: String, name: String): String? {
         val valueStart = valueStartOf(json, name, 0) ?: return null
         if (valueStart >= json.length) return null
         return if (json[valueStart] == '"') readJsonStringAt(json, valueStart)
         else json.substring(valueStart).takeWhile { it != ',' && it != '}' }.trim()
     }
 
-    private fun intField(json: String, name: String): Int? = field(json, name)?.trim()?.toIntOrNull()
+    internal fun intField(json: String, name: String): Int? = field(json, name)?.trim()?.toIntOrNull()
 
     /**
      * 找到锚定的 key（紧跟在 { 或 , 之后，忽略中间空白；紧跟着 : ，也忽略空白），

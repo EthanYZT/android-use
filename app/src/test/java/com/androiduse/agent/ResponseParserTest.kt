@@ -133,4 +133,66 @@ class ResponseParserTest {
         """.trimIndent()
         assertEquals("收到", ResponseParser.extractContent(api))
     }
+
+    @Test
+    fun extractCompletionReportsFinishReasonAndReasoningTokens() {
+        // 2026-09-17 真机复现：推理模型把 max_tokens 全烧在 reasoning_content 上时，
+        // finish_reason=length、content 为空串。只看 content 会把"被截断"误判成"解析不出"，
+        // 所以要把 finish_reason 和推理 token 数一起取出来给上层判断。
+        val api = """
+            {"choices":[{"finish_reason":"length","index":0,"message":{
+            "reasoning_content":"让我分析一下截图…","content":"","role":"assistant"}}],
+            "usage":{"completion_tokens":2000,"prompt_tokens":786,
+            "completion_tokens_details":{"reasoning_tokens":1998}}}
+        """.trimIndent()
+        val c = ResponseParser.extractCompletion(api)!!
+        assertEquals("", c.content)
+        assertEquals("length", c.finishReason)
+        assertEquals(1998, c.reasoningTokens)
+    }
+
+    @Test
+    fun extractCompletionToleratesMissingUsageAndFinishReason() {
+        val api = """{"choices":[{"message":{"role":"assistant","content":"{\"action\":\"back\"}"}}]}"""
+        val c = ResponseParser.extractCompletion(api)!!
+        assertEquals("""{"action":"back"}""", c.content)
+        assertNull(c.finishReason)
+        assertNull(c.reasoningTokens)
+    }
+
+    @Test
+    fun extractCompletionReturnsNullWhenNoContent() {
+        assertNull(ResponseParser.extractCompletion("""{"error":{"message":"bad key"}}"""))
+    }
+
+    @Test
+    fun extractCompletionReadsToolCallsWithEscapedArguments() {
+        // 真实形态：arguments 是一个 JSON 字符串（内含转义引号），content 是模型的观察笔记。
+        val api = """
+            {"choices":[{"finish_reason":"tool_calls","index":0,"message":{"role":"assistant",
+            "content":"已看到\"关于本机\"入口",
+            "tool_calls":[{"id":"call_a1","type":"function","function":{"name":"tap","arguments":"{\"id\":7}"}},
+                           {"id":"call_a2","type":"function","function":{"name":"finish","arguments":"{\"summary\":\"型号 \\\"一加\\\"\"}"}}]}}],
+            "usage":{"completion_tokens":300,"completion_tokens_details":{"reasoning_tokens":250}}}
+        """.trimIndent()
+        val c = ResponseParser.extractCompletion(api)!!
+        assertEquals("已看到\"关于本机\"入口", c.content)
+        assertEquals("tool_calls", c.finishReason)
+        assertEquals(2, c.toolCalls.size)
+        assertEquals(ToolCall("call_a1", "tap", """{"id":7}"""), c.toolCalls[0])
+        assertEquals("finish", c.toolCalls[1].name)
+        assertEquals("""{"summary":"型号 \"一加\""}""", c.toolCalls[1].argumentsJson)
+    }
+
+    @Test
+    fun extractCompletionWithNullContentAndToolCallsYieldsEmptyContent() {
+        // 有些模型只发 tool_calls 时 content 为 null，不能因此判成"没有 content"。
+        val api = """
+            {"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"back","arguments":"{}"}}]}}]}
+        """.trimIndent()
+        val c = ResponseParser.extractCompletion(api)!!
+        assertEquals("", c.content)
+        assertEquals(listOf(ToolCall("c1", "back", "{}")), c.toolCalls)
+    }
 }
