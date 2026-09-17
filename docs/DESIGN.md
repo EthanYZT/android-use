@@ -552,9 +552,23 @@ fn preflight(action, expected_context) -> Decision:
 
 | 层 | 选型 | 理由 |
 |---|---|---|
-| Planner / 工具编排 / 记忆 | **DeepSeek 4.1 Flash** | 长上下文、tool use 成熟、成本低 |
-| GUI Grounder（兜底看图出坐标） | **UI-TARS / Qwen-VL / GLM-4.5V** | 专门训过 GUI grounding |
+| Planner / 工具编排 / 记忆 | **deepseek-v4.1-flash** | 长上下文、tool use 成熟；已在方舟 Agent Plan 套餐内 |
+| GUI Grounder（兜底看图出坐标） | **glm-5.3-flash** | 2026-09-17 真机横评选定，见下表 |
 | 端侧 OCR | **ML Kit 中文识别**（模型打包进 APK） | 低延迟、不联网、隐私；WeChat 项目已验证 |
+
+**Grounder 横评（2026-09-17，真机设置页截图定位「显示与亮度」，真值 y≈950）**：
+
+| 模型 | 延迟 | tokens | 返回坐标 | 真机命中 |
+|---|---|---|---|---|
+| **glm-5.3-flash** | 6.6s | **605** | (500,945) | ✅ 实测命中 |
+| doubao-seed-2.0-lite | 5.4s | 1643 | (340,948) | ✅ |
+| doubao-seed-2.1-turbo | 19.8s | 2167 | (347,948) | ✅ |
+| kimi-k3 | 14.7s | 796 | 空响应 | ❌ 不可用 |
+
+**接入方式**：火山方舟 Agent Plan 订阅套餐，OpenAI 兼容端点
+`https://ark.cn-beijing.volces.com/api/plan/v3`。
+⚠️ **不要用 `/api/v3`** —— 那是按量计费通道，控制台明确警告会产生额外费用，且订阅 key 在该端点鉴权失败。
+套餐支持在请求里直接指定 model name，因此 Planner / Grounder 可各自选模型。
 
 > Planner 与 Grounder 通过接口解耦，可独立替换（如换 Claude / Gemini / 其他 GUI 模型）。
 

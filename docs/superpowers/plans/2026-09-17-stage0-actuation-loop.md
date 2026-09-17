@@ -28,7 +28,17 @@
 - **模型接入走 Agent Plan 订阅套餐专属通道**（2026-09-17 实测确认）：
   - Base URL **必须**是 `https://ark.cn-beijing.volces.com/api/plan/v3`（OpenAI 兼容）
   - ⚠️ **禁止使用 `https://ark.cn-beijing.volces.com/api/v3`** —— 控制台明确警告"接入会产生额外费用"，且订阅 key 在该端点鉴权会直接失败
-  - 模型名统一填 `ark-code-latest`，具体用哪个模型在方舟控制台「使用配置」里切换，切换后 3–5 分钟生效
+  - **可直接在请求里指定具体 model name**（控制台「使用配置 → 方式二」），不必用 `ark-code-latest` 兜底。这使 spec §10.1 的 Planner/Grounder 双模型分层成为可能
+  - **阶段 0 的 grounder 定为 `glm-5.3-flash`**（2026-09-17 四模型横评实测，同一张设置页截图定位「显示与亮度」，真值 y≈950）：
+
+    | 模型 | 延迟 | tokens | 返回坐标 | 真机命中 |
+    |---|---|---|---|---|
+    | **glm-5.3-flash** | 6.6s | **605** | (500,945) | ✅ 实测命中 |
+    | doubao-seed-2.0-lite | 5.4s | 1643 | (340,948) | ✅ |
+    | doubao-seed-2.1-turbo | 19.8s | 2167 | (347,948) | ✅ |
+    | kimi-k3 | 14.7s | 796 | 空响应 | ❌ 不可用 |
+
+    选它的理由：token 仅为豆包 lite 的 1/3，延迟相近，AFP 额度更耐用。备选 `doubao-seed-2.0-lite`（更快但更贵）。**不要用 `kimi-k3`**（返回空 content）和 `doubao-seed-2.1-turbo`（19.8s 对逐步循环太慢）
   - 套餐额度按 AFP（Agent 燃料值）计：近 5 小时 1 万 / 近一周 3.5 万 / 近一月 10 万
   - **已实测该通道支持图片输入且 grounding 准确**：用真机设置页截图要求定位「显示与亮度」，模型返回 `{"action":"tap","x":326,"y":950}`，换算成像素 (351,2256) 注入后成功进入 `Settings$DisplaySettingsActivity`
 - **阶段 0 只操作安全 App**：系统设置（`com.android.settings`）与便签。**禁止**在微信、支付宝、银行、游戏上运行（spec §10.5）。
@@ -220,8 +230,8 @@ dependencies {
 sdk.dir=/Users/YOURNAME/Library/Android/sdk
 # Agent Plan 订阅套餐的专属 API Key（控制台 → 订阅 → Agent Plan → 使用配置）
 ark.apiKey=你的 Agent Plan 专属 API Key
-# 订阅套餐统一用这个模型名，实际模型在控制台切换
-ark.modelId=ark-code-latest
+# 阶段 0 的 grounder，实测最省 token 且命中准确；备选 doubao-seed-2.0-lite
+ark.modelId=glm-5.3-flash
 # 必须用 /api/plan/v3。用 /api/v3 会走按量计费并产生额外费用
 ark.baseUrl=https://ark.cn-beijing.volces.com/api/plan/v3
 ```
@@ -1883,7 +1893,7 @@ import com.androiduse.log.TaskLogger
 cd /Users/ethan/Desktop/01_Active_Projects/android-use && cat local.properties.example
 ```
 填入 Agent Plan 的专属 API Key（方舟控制台 → 订阅 → Agent Plan → 使用配置 → 专属 APIKey），
-`ark.modelId` 固定为 `ark-code-latest`，`ark.baseUrl` 固定为 `https://ark.cn-beijing.volces.com/api/plan/v3`，
+`ark.modelId` 填 `glm-5.3-flash`，`ark.baseUrl` 固定为 `https://ark.cn-beijing.volces.com/api/plan/v3`，
 `sdk.dir` 填本机 Android SDK 路径。**不要改成 /api/v3**，那会走按量计费。
 
 Run:
