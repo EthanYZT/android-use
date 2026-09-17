@@ -6,14 +6,18 @@ import org.junit.Test
 
 class DisplayParserTest {
 
+    // Decoy values (5, 7) are intentionally distinct from the expected result (0, 3)
+    // so the test fails if the regex over-matches beyond mDisplayId= (e.g., matching
+    // any "displayId" pattern). An over-broad regex would extract 0, 3, 5, 7
+    // and the assertion would fail.
     private val dumpsysDisplayWithVirtual = """
-          mViewports=[DisplayViewport{type=INTERNAL, valid=true, displayId=0, uniqueId='local:4630946652107814787'}]
+          mViewports=[DisplayViewport{type=INTERNAL, valid=true, displayId=5, uniqueId='local:4630946652107814787'}]
           Display 0:
             mDisplayId=0
-            mBaseDisplayInfo=DisplayInfo{"内置屏幕", displayId 0}
+            mBaseDisplayInfo=DisplayInfo{"内置屏幕", displayId 5}
           Display 3:
             mDisplayId=3
-            mBaseDisplayInfo=DisplayInfo{"叠加视图 #1", displayId 3}
+            mBaseDisplayInfo=DisplayInfo{"叠加视图 #1", displayId 7}
     """.trimIndent()
 
     private val dumpsysDisplayOnlyPhysical = """
