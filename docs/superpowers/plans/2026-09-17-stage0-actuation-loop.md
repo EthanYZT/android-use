@@ -25,6 +25,12 @@
   - **实测隔离性成立**：向 display 3 注入后，display 3 的 Activity 变化，display 0 顶层 Activity 不变。
 - **两套 display id 必须分清**：逻辑 `displayId`（小整数，如 `3`，用于 `am start --display` 和 `input -d`）与 SurfaceFlinger display id（20 位长整数，如 `11529215046336967767`，只用于 `screencap -d`）。混用会静默失败。
 - **密钥不得入库**：Ark API Key 写在 `local.properties`，经 BuildConfig 注入；`local.properties` 必须在 `.gitignore` 里。
+- **模型接入走 Agent Plan 订阅套餐专属通道**（2026-09-17 实测确认）：
+  - Base URL **必须**是 `https://ark.cn-beijing.volces.com/api/plan/v3`（OpenAI 兼容）
+  - ⚠️ **禁止使用 `https://ark.cn-beijing.volces.com/api/v3`** —— 控制台明确警告"接入会产生额外费用"，且订阅 key 在该端点鉴权会直接失败
+  - 模型名统一填 `ark-code-latest`，具体用哪个模型在方舟控制台「使用配置」里切换，切换后 3–5 分钟生效
+  - 套餐额度按 AFP（Agent 燃料值）计：近 5 小时 1 万 / 近一周 3.5 万 / 近一月 10 万
+  - **已实测该通道支持图片输入且 grounding 准确**：用真机设置页截图要求定位「显示与亮度」，模型返回 `{"action":"tap","x":326,"y":950}`，换算成像素 (351,2256) 注入后成功进入 `Settings$DisplaySettingsActivity`
 - **阶段 0 只操作安全 App**：系统设置（`com.android.settings`）与便签。**禁止**在微信、支付宝、银行、游戏上运行（spec §10.5）。
 - **每个任务结束必须提交**，提交信息结尾加：
   ```
@@ -212,9 +218,12 @@ dependencies {
 ```properties
 # 复制为 local.properties 后填入真实值。local.properties 不入库。
 sdk.dir=/Users/YOURNAME/Library/Android/sdk
-ark.apiKey=在火山方舟控制台创建的 API Key
-ark.modelId=在火山方舟控制台开通的豆包视觉模型的 endpoint id 或 model id
-ark.baseUrl=https://ark.cn-beijing.volces.com/api/v3
+# Agent Plan 订阅套餐的专属 API Key（控制台 → 订阅 → Agent Plan → 使用配置）
+ark.apiKey=你的 Agent Plan 专属 API Key
+# 订阅套餐统一用这个模型名，实际模型在控制台切换
+ark.modelId=ark-code-latest
+# 必须用 /api/plan/v3。用 /api/v3 会走按量计费并产生额外费用
+ark.baseUrl=https://ark.cn-beijing.volces.com/api/plan/v3
 ```
 
 - [ ] **Step 3: 把 local.properties 加进 .gitignore**
@@ -1584,7 +1593,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * 调用火山方舟（OpenAI 兼容接口）的豆包视觉模型。
+ * 调用火山方舟 Agent Plan 订阅套餐的 OpenAI 兼容接口。
+ *
+ * baseUrl 必须是 .../api/plan/v3（订阅通道），不是 .../api/v3（按量计费通道）——
+ * 后者会产生额外费用且订阅 key 在那里鉴权失败。model 统一传 ark-code-latest，
+ * 实际使用哪个模型由方舟控制台的「使用配置」决定。
+ *
  * 只做 HTTP，不含解析逻辑——解析在 ResponseParser 里，那部分可单测。
  */
 class ArkVisionClient(
@@ -1868,7 +1882,9 @@ import com.androiduse.log.TaskLogger
 ```bash
 cd /Users/ethan/Desktop/01_Active_Projects/android-use && cat local.properties.example
 ```
-按照示例填入真实的 `ark.apiKey` 与 `ark.modelId`（从火山方舟控制台取），`sdk.dir` 填本机 Android SDK 路径。
+填入 Agent Plan 的专属 API Key（方舟控制台 → 订阅 → Agent Plan → 使用配置 → 专属 APIKey），
+`ark.modelId` 固定为 `ark-code-latest`，`ark.baseUrl` 固定为 `https://ark.cn-beijing.volces.com/api/plan/v3`，
+`sdk.dir` 填本机 Android SDK 路径。**不要改成 /api/v3**，那会走按量计费。
 
 Run:
 ```bash
