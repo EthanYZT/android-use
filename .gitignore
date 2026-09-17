@@ -1,0 +1,16 @@
+# 本地大文件 / 敏感物料，不入库
+*.img
+payload.bin
+*.apk
+*.zip
+local/
+secrets/
+.env
+*.key
+
+# 构建产物
+build/
+.gradle/
+*.iml
+.idea/
+.DS_Store
