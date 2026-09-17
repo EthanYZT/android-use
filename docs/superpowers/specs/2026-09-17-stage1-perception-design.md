@@ -25,10 +25,12 @@
 
 ```kotlin
 fun execArgv(argv: List<String>, timeoutMs: Long = 15_000): ShellResult =
-    run(listOf("su", "-c", "exec \"\$@\"", "--") + argv, timeoutMs)
+    run(listOf("su", "root") + argv, timeoutMs)   // su root <argv...>
 ```
 
-`su -c 'exec "$@"' -- a b c`：`-c` 段是固定字面量，用户数据全走 `$@` 位置参数，shell 不再二次展开（不拆词、不展开 `$`、不解释 `;`）。KernelSU 的 `su` 兼容此语义。真机第一步验证 `execArgv(["echo","a;id","$HOME"])` 原样回显。
+`su root <argv>`：KernelSU 的 su 用法是 `su [options] [-] [user [argument...]]`，给定 user 后其余参数**被 su 直接 execve 给目标程序，不经任何 shell**。每个 argv 元素原样成为一个参数，不拆词、不展开 `$`、不解释 `;`。
+
+⚠️ **踩过的坑（2026-09-17 真机 v4.2.0 实测）**：最初写成标准 `sh` 的位置参数用法 `su -c 'exec "$@"' -- <argv>`。**KernelSU 的 su 不转发位置参数**——它把 `-c` 之后的参数用空格拼到命令串尾部再交给 `sh -c` 重新解析（`$#`=0、`$@` 为空），不可信文本被二次解析、注入原语重新成立。当时误判"注入没爆"，实为 `exec` 提前替换进程的侥幸。真机核实用**设备侧单引号**避免 adb shell 二次解析：`adb shell "su root echo 'a;id'"` → 原样 `a;id`。
 
 **约束（注释+单测）**：`exec(String)` 调用点只能是编译期常量 + 整数插值；新增字符串插值视为 bug。守护进程启动命令的 APK 路径/token 走 `execArgv`。
 

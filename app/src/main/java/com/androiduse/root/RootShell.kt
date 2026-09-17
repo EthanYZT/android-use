@@ -30,20 +30,31 @@ object RootShell {
      * 与 [exec] 的本质区别：`exec` 把整条命令交给 shell 解析，字符串里的 `;` `$` `|`
      * 空格、引号都会被二次解释——不可信字符串一旦流进去就是 root 命令注入原语。本方法用
      *
-     *     su -c 'exec "$@"' -- arg0 arg1 arg2 ...
+     *     su root <argv...>
      *
-     * `-c` 后面那段是**固定字面量**，不含任何用户数据；真正的参数全部落在 `$@` 位置参数上，
-     * shell 不会对它们做拆词、变量展开或元字符解释——每个 [argv] 元素原样成为目标程序的一个
-     * 参数。语义与 execve 直接传 argv 等价，只是借道 su 拿 root。
+     * KernelSU 的 su 用法是 `su [options] [-] [user [argument...]]`：给定 user（这里固定
+     * `root`）后，其余参数**被 su 直接 execve 给目标程序，不经过任何 shell**（2026-09-17
+     * 真机 v4.2.0 实测：`su root echo 'a;id'` 原样输出 `a;id`，`;` 不执行、`$HOME` 不展开）。
+     * 因此每个 [argv] 元素原样成为目标程序的一个参数，语义等价于 execvp 直接传 argv。
      *
-     * `argv[0]` 是要执行的程序名（如 "input"、"am"），其余是它的参数。
+     * ⚠️ **不要写成 `su -c 'exec "$@"' -- <argv>`**：那是标准 `sh -c script arg0 arg1` 的
+     * 位置参数用法，但 KernelSU 的 su **不转发位置参数**——它把 `-c` 之后的所有参数用空格
+     * 拼到命令串尾部再交给 `sh -c` 重新解析（`$#`=0、`$@` 为空）。那样不可信文本会被二次
+     * 解析，注入原语重新成立（当时"注入没爆"只是 `exec` 提前替换进程的侥幸，换个 payload
+     * 位置就会执行）。详见 RootShellArgvTest 的说明与 device-oneplus-ace5 记忆。
+     *
+     * [argv]`[0]` 是要执行的程序名（如 "input"、"am"，走 PATH 查找），其余是它的参数。
      * 例：`execArgv(listOf("input", "-d", "7", "text", 不可信文本))`——不可信文本即便含
      * `;rm -rf /` 也只是 `input text` 的一个字面参数，不会被执行。
-     *
-     * 单测见 RootShellArgvTest（用 sh 代 su 验证同一包裹语义，可在无 root 构建机上跑）。
      */
     fun execArgv(argv: List<String>, timeoutMs: Long = 15_000): ShellResult =
-        run(listOf("su", "-c", "exec \"\$@\"", "--") + argv, timeoutMs)
+        run(suArgv(argv), timeoutMs)
+
+    /**
+     * 构造 `su root <argv>` 命令行。拆出来是为了能在无 su 的构建机上单测「argv 前缀正确、
+     * 不可信参数原样放在尾部、不被包进任何 shell 字符串」，见 RootShellArgvTest。
+     */
+    internal fun suArgv(argv: List<String>): List<String> = listOf("su", "root") + argv
 
     /**
      * 真正跑进程的核心逻辑，接受任意 argv。生产代码通过 [exec]（拼 `su -c <string>`）或 [execArgv]（`su -c` + 固定包裹 + argv）调用；
