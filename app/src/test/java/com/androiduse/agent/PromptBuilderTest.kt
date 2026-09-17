@@ -2,6 +2,7 @@ package com.androiduse.agent
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,7 +49,6 @@ class PromptBuilderTest {
         assertTrue("产出的请求体必须是括号/引号配平的合法 JSON", isStructurallyValidJson(body))
         assertTrue(body.contains("\"model\":\"test-model\""))
         assertTrue(body.contains("\"temperature\":0"))
-        assertTrue(body.contains("\"max_tokens\":300"))
         assertTrue("空 history 要落到占位文案", body.contains("还没有执行过任何步骤"))
 
         // 嵌套顺序：system 消息在 user 消息之前；user 的 content 数组里 image_url 在 text 之前。
@@ -123,5 +123,24 @@ class PromptBuilderTest {
         // （见 PromptBuilder 顶部注释）。任何人以后不小心把 {"action":"home"} 加回动作列表，
         // 这条测试就会红。
         assertFalse(PromptBuilder.systemPrompt().contains("home", ignoreCase = true))
+    }
+
+    @Test
+    fun maxTokensLeavesHeadroomForReasoningModelsSoContentIsNotTruncatedAway() {
+        // glm-5.3-flash 是推理模型：绝大部分 completion 预算花在 reasoning_content 上，
+        // content 在推理之后才输出。上限太小 -> finish_reason=length、content 为空字符串 ->
+        // ResponseParser 解析不出动作 -> 整个任务中止。这不是解析器的 bug，是回复被砍掉了。
+        //
+        // 2026-09-17 真机实测的推理 token 用量（随历史增长）：空历史 63 / 2 条 106 / 5 条 170。
+        // max_tokens 是上限不是预留，调大不增加实际花费，所以留足余量。
+        // 若有人把它改小到接近实测值，这条测试会红。
+        val body = PromptBuilder.buildRequestBody("m", "t", emptyList(), "ZmFrZQ==")
+        val declared = Regex("\"max_tokens\":(\\d+)").find(body)?.groupValues?.get(1)?.toInt()
+        assertNotNull("请求体里必须声明 max_tokens", declared)
+        assertTrue(
+            "max_tokens=$declared 对推理模型余量不足：实测 5 条历史已用到 170 推理 token，" +
+                "低于 1000 有被截断导致 content 为空的风险",
+            declared!! >= 1000,
+        )
     }
 }

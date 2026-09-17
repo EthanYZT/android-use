@@ -572,6 +572,22 @@ fn preflight(action, expected_context) -> Decision:
 
 > Planner 与 Grounder 通过接口解耦，可独立替换（如换 Claude / Gemini / 其他 GUI 模型）。
 
+**⚠️ 推理模型的 `max_tokens` 陷阱（2026-09-17 阶段 0 实测，踩过一次）**
+
+套餐里多数模型（glm-5.3、deepseek-v4.x、doubao-seed 系）都是**推理模型**：绝大部分 completion 预算花在 `reasoning_content` 上，`content` 是在推理之后才输出的。`max_tokens` 设小的后果不是回复变短，而是：
+
+```
+finish_reason = length，reasoning 吃满预算，content = ""   →  解析不出动作  →  任务中止
+```
+
+这个失败**看起来像解析器的 bug**，实际是回复被砍掉了。阶段 0 的多步验收就是这样挂的。
+
+- 实测（真实提示词，glm-5.3-flash，推理 token 随历史增长）：空历史 63 / 2 条 106 / 5 条 170
+- **`max_tokens` 是上限不是预留**——模型只用 150 token 时把上限设成 2000 不会多花钱，只在本该被截断时起作用。**留足余量是零成本的保险**，不要为"省钱"调小。
+- 排查线索：看 `usage.completion_tokens_details.reasoning_tokens` 与 `finish_reason`。`finish_reason=length` + 空 `content` 就是这个病。
+
+> 教训延伸：横评模型时**必须用代码里真实的提示词**。用自编的简化提示词横评，得到的 token 消耗和选型结论都可能反过来——阶段 0 就出现过自编提示词下 doubao-lite 更省、真实提示词下 glm 更省的反转。
+
 ### 10.2 内部项目参考
 
 - **`~/Desktop/01_Active_Projects/WeChat`** —— 已上线的微信/企微无障碍自动化项目，本文档多处设计的来源。详见 §11。
