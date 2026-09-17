@@ -4,10 +4,11 @@
 > 它操作手机、调用系统工具与应用接口、加载内置 Skill、拥有记忆。
 > 接入策略：**MCP + 系统接口 + GUI 兜底**。
 
-- 状态：设计阶段（草案 v0.1）
+- 状态：设计阶段（草案 v0.2）
 - 最后更新：2026-09-17
 - 受众：作者本人 + 协作开发者（含 AI coding agent）
 - 参照对象：豆包手机助手（努比亚 NaviX Ultra）、Android 16 AppFunctions、Apple iOS 27 App Intents / Siri AI
+- 内部经验来源：`~/Desktop/01_Active_Projects/WeChat`（已上线的无障碍自动化项目，见 §11）
 
 ---
 
@@ -28,7 +29,7 @@
 |---|---|---|---|---|
 | 规划大脑 | 云端 VLM（UI-TARS 系）+ 端侧小模型 | 系统特权 Agent（Gemini） | System Orchestrator + AFM（端+PCC） | DeepSeek 4.1 Flash（云）+ 端侧 OCR |
 | 动作调用 | MCP + 系统接口 + GUI | AppFunctions 注册表（App 声明函数） | App Toolbox（App Intents 注册为 tool） | MCP + 系统接口 + GUI 兜底 |
-| 屏幕理解 | 截图 + 多模态认像素 | 无（纯协议） | Onscreen Awareness（App 标注 View） | 截图 + AccessibilityNodeInfo 树 双路 |
+| 屏幕理解 | 截图 + 多模态认像素 | 无（纯协议） | Onscreen Awareness（App 标注 View） | 节点树 → 裁图 OCR → 截图 VLM 三级降级 |
 | 执行方式 | INJECT_EVENTS + VirtualDisplay | 无 GUI | 无 GUI | injectInputEvent + VirtualDisplay（root） |
 | 权限来源 | 系统签名预装（厂商合作） | signature 权限 `EXECUTE_APP_FUNCTIONS` | 系统私有 | **root（KernelSU）** |
 | 通用性 | 高（GUI 可覆盖任意 App） | 低（需 App 适配） | 低（需 App 适配） | **高（GUI 兜底覆盖任意 App）** |
@@ -135,7 +136,7 @@ fn route(action):
 
 - MCP 调用失败（超时/报错）→ 不自动降级到 GUI（可能重复下单），**回到 Orchestrator 让它判断**是否换通道或询问用户。
 - 系统接口跳转后停在中间页 → 可由 GUI 接手完成剩余步骤（豆包也是这种混合）。
-- GUI 连续 N 步无进展 → 触发自纠错（见 §4.4）或求助用户。
+- GUI 连续 N 步无进展 → 触发自纠错（见 §4.5）或求助用户。
 
 ### 3.4 GUI 操作边界（借鉴 SAEP）
 
@@ -180,14 +181,50 @@ IInputManager.injectInputEvent(
 - 效果：**用户前台正常用手机，Agent 在"影子屏"后台办事**；顶部提供"监工"入口把虚拟屏投到前台查看。
 - 这是豆包"任务后台静默运行、任务排队、多线程事务"的实现基础。
 
-### 4.3 仿生轨迹（反风控）
+### 4.3 反风控（三条线，缺一不可）
 
+> 已在 WeChat 项目验证过的工程实践，直接继承。
+
+**① 轨迹仿生**
 - 点击坐标加微小随机偏移（非像素级完美）。
 - 按压时长符合人类分布（非固定值）。
 - 滑动走贝塞尔曲线（非直线）。
-- 目的：降低被 App 风控识别为机械点击的概率。**但这不是万能的**——见 §10 风控注意事项。
 
-### 4.4 自纠错与长任务续跑
+**② 时序抖动（`HumanTiming`）**
+- 在每个固定等待时长上叠加 0%~40% 随机量。
+- **关键约束：只加不减**。UI 渲染需要的最小等待仍然保证，不能因为抖动反而点太快点不中。
+- 完全一致的操作间隔是风控模型最容易抓的特征——真人操作间隔必然有波动。
+
+**③ 频率限流（`SendRateLimiter`）**
+- 对**有外部可见副作用**的动作（发消息、发帖、下单）做小时/天双滑动窗口限流。
+- 超限不是报错，而是**交回人工**。
+- 这是软性节流线，用来降低短时高频触发风控的概率，不是硬安全边界。
+
+**④ 并发互斥（容易被忽略但很重要）**
+- Agent 必须知道自己 `isBusy()`，不同任务链路之间互斥（WeChat 项目踩过"通知链路与未读扫描并发"的坑）。
+- **用户正在前台看某个界面时，不要去操作它**。有了 VirtualDisplay 可以把任务挪到影子屏，但涉及前台的操作仍需让路。
+
+> 以上都只降低概率，不解决根本。**根本解法是能走协议就别走 GUI**（§3）。
+
+### 4.4 多级兜底链（关键动作必须有降级路径）
+
+WeChat 项目最有价值的模式之一：**每个关键动作都设计降级链，最后一级是"像人一样操作"**。
+
+以"从后台拉起某个 App 的指定页面"为例，四级兜底：
+
+```
+① contentIntent / startActivity 直接跳转
+   ↓ 失败（MIUI/ColorOS 未授"后台弹出界面"权限时会被静默丢弃，无异常、无窗口变化）
+② launchIntent 拉起 App 主页
+   ↓ 失败
+③ 下拉通知栏，点那条通知 —— 跳转由系统 UI 发起，不受后台弹出限制，且直接落到目标页
+   ↓ 通知被折叠/找不到
+④ 回桌面点 App 图标 —— 像人一样打开，系统不拦
+```
+
+**通用原则**：越往后的兜底越"像真人"、越不依赖特权 API，成功率越高但越慢。Orchestrator 应该知道自己走到了第几级，并据此调整耐心和超时。
+
+### 4.5 自纠错与长任务续跑
 
 - **进度检测**：每步执行后对比前后屏幕状态，判断是否有实质进展。
 - **偏差识别**：连续无进展 / 出现非预期页面（弹窗、验证码、报错）→ 标记偏差点。
@@ -198,20 +235,52 @@ IInputManager.injectInputEvent(
 
 ## 5. 感知与 Grounding
 
-### 5.1 双路输入（关键设计，借鉴 Apple onscreen awareness）
+### 5.1 三级降级（关键设计）
 
-苹果的思路是让 App 主动把 View 标注成结构化 Entity，模型不必去认像素。安卓上我们没有这个协议，但 **AccessibilityNodeInfo 树是天然的等价物**。因此：
+苹果的思路是让 App 主动把 View 标注成结构化 Entity，模型不必去认像素。安卓上没有这个协议，但 **AccessibilityNodeInfo 树是天然的等价物**。
 
-- **截图路**：喂给 Grounder（GUI 模型），处理图标、图片、Canvas、WebView 等节点树覆盖不到的内容。
-- **节点树路**：`AccessibilityNodeInfo` / `uiautomator dump` 提供精确的元素 bounds、text、id、可点击性——用于**精确 grounding**，直接拿到坐标，不必让模型猜。
-- **融合**：优先用节点树定位；节点树缺失或不完整（自绘 UI、部分 WebView）时回退到截图 + Grounder。
+**但 WeChat 项目的实战证明：节点树是有洞的，必须有兜底。** 因此设计成三级降级：
 
-> 收益：显著提高点击准确率、降低对昂贵 GUI 模型的调用频率、省 token。
+```
+① 节点树 (AccessibilityNodeInfo)
+   精确 bounds/text/id/可点击性，直接拿坐标，零模型开销
+   ↓ 节点缺失 / NAF 空容器 / 文字读不到
+② 裁剪区域 OCR (端侧 ML Kit)
+   按已知节点的 bounds 截图裁剪 → 本地 OCR，不联网、不上云
+   ↓ 连区域都定位不到 / 图标类元素
+③ 全屏截图 → Grounder (GUI 模型)
+   模型看图出坐标，最通用也最贵
+```
 
-### 5.2 端侧 OCR
+**②级为什么必须存在**——WeChat 8.0.77 的真实案例：
+- 语音转出的文字节点（`brv`）刚转出来时对无障碍**不可见**，容器 `bru` 是 NAF 空容器，取消再转、先播放、滚出屏幕、退出重进全都不行
+- 聊天页顶栏标题下面**没有暴露文字节点**，无障碍完全读不到当前聊天对象
+- 微信自带的"提取文字"结果页是一个个涂抹方块，也读不到
 
-- 本地做文字提取，用于快速判断页面状态、读取关键信息，减少上云。
-- 敏感信息（见 §8）在本地处理，不上传。
+这两种情况都只能"按框裁图 + 本地 OCR"。而这类需求（读一小块区域的文字）用全屏 VLM 既慢又贵。
+
+> 收益：绝大多数操作走①，成本近乎为零；②覆盖节点树的洞；③只在真正需要视觉理解时才用。
+
+### 5.2 节点定位的三个陷阱（血泪教训）
+
+**① 不要用 `findAccessibilityNodeInfosByText` 定位可点击元素**
+它是**子串匹配**，而且**会连 contentDescription 一起匹配**。WeChat 项目实测：按"发送"找，会先命中聊天列表里的视频气泡，点上去变成打开预览。
+→ **优先按 resource-id 定位**；必须按文字时，加"不在可滚动列表内"等约束。
+
+**② 精确匹配 vs 包含匹配要想清楚**
+"转文字" 和 "取消转文字" —— 用包含匹配会点错，把已转好的文字收起来。
+→ 菜单项一律**完全匹配**。
+
+**③ 混淆的 resource-id 会随 App 版本变**
+微信的 id 是 `bkj`/`bk1`/`brp` 这种混淆产物，每次大版本可能全变。这是节点树方案的**根本脆弱性**。
+→ 对策见 §7.4：**把选择器放进 Skill，按 App + 版本维护、可热更新**，而不是硬编码进 Agent 内核。
+
+### 5.3 端侧 OCR
+
+- **ML Kit 中文识别，模型打包进 APK**，不依赖 Google 服务、不联网（WeChat 项目已验证可行）。
+- 用途：读节点树拿不到的区域、快速判断页面状态、执行前状态核对（§8.7）。
+- 敏感信息（见 §8.6）在本地处理，不上传。
+- OCR 结果按位置（先上后左）拼接成阅读顺序；中文直接相连，英文/数字间补空格。
 
 ---
 
@@ -272,6 +341,34 @@ capability_hint: gui   # gui | system | mcp
 - Orchestrator 根据用户意图 + skill 的 `description/triggers` 做相关性匹配，按需把 SKILL.md 注入上下文。
 - 与 Claude Code 的 skill 机制同构，降低学习成本、便于复用现有生态。
 
+### 7.4 选择器归 Skill 管（应对 App 改版）
+
+**问题**：GUI 兜底依赖的 resource-id 是 App 的混淆产物，大版本更新可能全变（§5.2 陷阱③）。如果硬编码进 Agent 内核，每次 App 改版都要发版。
+
+**方案**：把"某 App 某版本的界面知识"作为 skill 的一部分，随 skill 热更新。
+
+```markdown
+---
+name: wechat-send-message
+app: com.tencent.mm
+app_version: "8.0.77"        # 明确适用版本
+verified_at: 2026-09-11      # 什么时候用 uiautomator dump 验过
+---
+
+## 选择器
+- 输入框: com.tencent.mm:id/bkk
+- 发送按钮: com.tencent.mm:id/bql   # 注意: 不能按文字"发送"找, 会命中视频气泡
+- 聊天标题: com.tencent.mm:id/obq   # 无文字节点, 需裁图 OCR; 裁 obp 会切掉最后一个字
+
+## 步骤
+...
+```
+
+**配套机制**：
+- 版本不匹配时，Agent 知道选择器可能失效 → 降级到 §5.1 的②/③级（OCR / Grounder），而不是盲点。
+- 连续失败达阈值 → 标记该 skill 需要重新验证，提示用户或触发自动重采（`uiautomator dump` 对比）。
+- **这条设计把"App 改版"从"要改代码"降级成"要更新一份 Markdown"。**
+
 ---
 
 ## 8. 安全模型（直接移植 Apple WWDC26 Session 347）
@@ -314,7 +411,31 @@ capability_hint: gui   # gui | system | mcp
 - 登录、身份验证、密码/验证码输入
 - 系统敏感权限授权弹窗
 
-### 8.6 隐私
+### 8.6 执行前状态核对（Pre-flight Verification）
+
+> 来自 WeChat 项目的"发送前核对收件人"，防止**串台**——把消息发错人。
+
+确认门（§8.2）解决的是"这个动作该不该做"，但还有一类事故是"动作没错，**对象错了**"：GUI 操作是有状态的，中途 App 可能跳到别的页面、聊天窗口可能被切换、列表可能刷新导致点错行。
+
+**机制**：对有外部可见副作用的动作，**在执行的最后一刻重新确认当前上下文是不是预期的那个**。
+
+```
+fn preflight(action, expected_context) -> Decision:
+    if expected_context.is_none():   return Proceed        # 无信息可比, 不阻断
+    actual = read_current_context()                        # 节点树 → 裁图 OCR 兜底
+    if actual.is_none():             return ProceedWithLog # 读不到, 不阻断但记录
+    if not matches(actual, expected): return Abort         # 明显不一致 → 中止
+    return Proceed
+```
+
+**三条设计原则**（都来自实战）：
+1. **读不到 ≠ 不匹配**。读不到上下文时不阻断，只记日志——否则在无障碍读不到标题的 App 上会寸步难行。
+2. **归一化后再比**。昵称有后缀、空格、特殊符号，要先归一化，再用"相等或互相包含"判断。
+3. **失败就中止，不重试**。串台是不可逆的，宁可交回人工。
+
+**适用动作**：发消息、发帖、转账、删除、提交表单——凡是 §8.1 里 `benign` 以外的，都该过。
+
+### 8.7 隐私
 
 - **最小必要**：只收集完成任务必需的数据。
 - **端侧优先 + 脱敏**：敏感信息（PII）在上云前脱敏，"不进入 LLM 就无法被外泄"。
@@ -362,23 +483,27 @@ capability_hint: gui   # gui | system | mcp
 |---|---|---|
 | Planner / 工具编排 / 记忆 | **DeepSeek 4.1 Flash** | 长上下文、tool use 成熟、成本低 |
 | GUI Grounder（兜底看图出坐标） | **UI-TARS / Qwen-VL / GLM-4.5V** | 专门训过 GUI grounding |
-| 端侧 OCR | 端侧轻量模型 | 低延迟、隐私 |
+| 端侧 OCR | **ML Kit 中文识别**（模型打包进 APK） | 低延迟、不联网、隐私；WeChat 项目已验证 |
 
 > Planner 与 Grounder 通过接口解耦，可独立替换（如换 Claude / Gemini / 其他 GUI 模型）。
 
-### 10.2 开源参考
+### 10.2 内部项目参考
+
+- **`~/Desktop/01_Active_Projects/WeChat`** —— 已上线的微信/企微无障碍自动化项目，本文档多处设计的来源。详见 §11。
+
+### 10.3 开源参考
 
 - **[zai-org/Open-AutoGLM](https://github.com/zai-org/Open-AutoGLM)**（26k★）——Phone Agent 模型 + 框架，有纯端衍生版。
 - **[Core-Mate/open-gui](https://github.com/Core-Mate/open-gui)**——Android GUI Agent 框架，AccessibilityService + 手势 + 远程下发，可作起步基座。
 - **[droidrun/droidrun](https://github.com/droidrun/droidrun)**（9k★）——LLM 无关的移动 Agent，ADB/Portal 模式。
 - **[bytedance/UI-TARS](https://github.com/bytedance/UI-TARS)**——豆包同源 GUI 模型，可自部署做 Grounder。
 
-### 10.3 系统底座
+### 10.4 系统底座
 
 - **KernelSU / SukiSU-Ultra**（LKM 模式，补 init_boot）——测试机已就绪（见项目内存 `device-oneplus-ace5`）。
 - 选 KernelSU 而非 Magisk：SusFS 对国内 App root 检测更隐蔽。
 
-### 10.4 风控注意事项（血的教训）
+### 10.5 风控注意事项（血的教训）
 
 - 豆包一代**未 root**在微信/淘宝/银行就触发风控、账号被封；我们是 **root 机，风险更高**。
 - **不要**在微信/支付宝/游戏内做 GUI 自动化刷分刷激励。
@@ -387,7 +512,54 @@ capability_hint: gui   # gui | system | mcp
 
 ---
 
-## 11. 非目标（YAGNI）
+## 11. 从 WeChat 项目继承的工程经验
+
+内部已有一个**上线中的**安卓无障碍自动化项目（`~/Desktop/01_Active_Projects/WeChat`，微信/企微 AI 回复助手，22k 行 Kotlin，50+ 测试文件，已迭代到 1.0.1-beta4）。它踩过的坑构成本文档 §4.3 / §4.4 / §5.1 / §5.2 / §7.4 / §8.6 的直接来源。
+
+### 11.1 代码级可复用清单
+
+这些模块是**纯逻辑、不碰 Android、已有单测**，可以直接搬或改造：
+
+| 模块 | 作用 | 复用方式 |
+|---|---|---|
+| `HumanTiming.kt` | 时序抖动（只加不减） | 直接搬 |
+| `SendRateLimiter.kt` | 小时/天双滑动窗口限流 | 直接搬，扩展到所有副作用动作 |
+| `ScreenOcr.kt` | ML Kit 本地 OCR + 阅读顺序拼接 | 直接搬 |
+| `WeChatUi.kt` / `WeComUi.kt` | 微信/企微选择器与启发式 | 改造成 §7.4 的 skill 格式 |
+| `GroupHeuristics.kt` | 群聊/单聊判定 | 参考 |
+| `kb/` 包 | 分块、embedding、同步、检索 | 记忆层（§6）可直接借鉴其 RAG 实现 |
+| `reply/` 包 | 多 LLM provider 抽象、prompt 构建、响应解析 | Planner 层的 provider 抽象可参考 |
+
+### 11.2 架构层面的经验
+
+**① 纯函数与副作用分离**
+WeChat 项目把选择器、启发式、限流、解析全做成**无 Android 依赖的纯函数**（因此有 50+ 单测），副作用集中在一个 Service 里。
+→ **本项目照做**：能力路由的择优逻辑、安全网关的风险判定、Skill 匹配、OCR 拼接——全部做成可单测的纯函数。只有执行层碰系统。
+
+**② 但要避免它的问题：单个 Service 膨胀到 5492 行**
+WeChat 项目的 `SelectToSpeakService.kt` 已经承担了窗口监听、会话状态机、发送流程、图片流程、相册流程、兜底链路等所有职责。
+→ **本项目从一开始就按 §2.1 分层，每层独立可测**。执行层只负责"注入事件/抓帧/建虚拟屏"这种原子操作，流程编排归 Orchestrator，App 特定知识归 Skill。
+
+**③ 日志即调试基础设施**
+长任务 Agent 的 bug 极难复现（依赖 App 状态、网络、时序）。WeChat 项目有 `DebugLogger` + `LogViewerActivity` + `LogExporter`，日志里带精确时间戳和现象描述（"2026-09-14 14:23–14:25 日志：桌面上拉起三次全失败，无异常、无窗口变化"）——正是这类日志让他们定位到 MIUI 后台弹出限制。
+→ **本项目第一阶段就要建可导出的结构化任务日志**，记录每步的：动作、选择器、通道、耗时、前后屏幕状态。
+
+### 11.3 root 相对无障碍的具体优势（由该项目的坑反推）
+
+WeChat 项目被迫做的这些 workaround，在 root 下大部分可以直接绕过：
+
+| 它的坑 | 无障碍下的 workaround | root 下 |
+|---|---|---|
+| `ACTION_SET_TEXT` 被微信输入框拒绝 | 改点输入法候选文本 | `injectInputEvent` 直接注入按键，或 IME 层面注入 |
+| Android 15 后台剪贴板受限 | 放弃剪贴板方案 | 可用 shell 级剪贴板 |
+| 后台拉起 App 被系统静默丢弃 | 四级兜底链 | 仍需兜底，但可用 `am start` 等 shell 手段 |
+| 无法后台运行，占用前台 | 操作完自动返回主屏 | **VirtualDisplay 影子屏后台执行** |
+| 服务被系统杀死需手动重启 | KeepAliveService + 引导用户加白名单 | root daemon 常驻 |
+| 无障碍服务被 App 检测 | 服务名伪装 | KernelSU + SusFS 隐藏 |
+
+> 但注意：**root 不解决风控**。§4.3 的三条线和 §10.4 的注意事项仍然全部适用，甚至更重要。
+
+## 12. 非目标（YAGNI）
 
 明确**不做**，避免范围蔓延：
 
