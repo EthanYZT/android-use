@@ -59,6 +59,52 @@ data class Execution(
     val costMs: Long,
 )
 
+/** 从 transcript.jsonl 读回的只读视图。字段与写出时一一对应；nodes 只有数量与提示词文本。 */
+data class StoredTranscript(
+    val taskId: String,
+    val task: String,
+    val model: String,
+    val startedAtMs: Long,
+    val screenW: Int,
+    val screenH: Int,
+    val steps: List<StoredStep>,
+    val outcome: StoredOutcome?,
+)
+
+data class StoredStep(
+    val index: Int,
+    val screenshotPath: String?,
+    val nodeCount: Int,
+    val nodesBlock: String,
+    val dumpError: String?,
+    val replies: List<StoredReply>,
+    val execution: StoredExecution?,
+)
+
+data class StoredReply(
+    val note: String,
+    val toolCalls: List<ToolCall>,
+    val finishReason: String?,
+    val reasoningTokens: Int?,
+    val latencyMs: Long,
+)
+
+data class StoredExecution(val action: String?, val ok: Boolean, val result: String, val costMs: Long)
+
+/** 内存中的一步 → 只读视图（给实时 UI 用，和从 JSONL 读回的形态一致）。 */
+fun Step.toStored(): StoredStep = StoredStep(
+    index = index,
+    screenshotPath = observation.screenshotPath,
+    nodeCount = observation.nodes.size,
+    nodesBlock = observation.nodesBlock,
+    dumpError = observation.dumpError,
+    replies = replies.map { StoredReply(it.note, it.toolCalls, it.finishReason, it.reasoningTokens, it.latencyMs) },
+    execution = execution?.let { StoredExecution(it.action?.toString(), it.ok, it.result, it.costMs) },
+)
+
+/** 任务结束时追加的一行：完成与否、结论、结束时间。 */
+data class StoredOutcome(val finished: Boolean, val summary: String, val endedAtMs: Long)
+
 /**
  * Transcript → JSONL。第一行是任务头，之后每步一行。手写编码（JVM 单测里 org.json 是桩）。
  * 不写截图 base64，只写路径——日志要能随手导出，不能几十 MB。
@@ -87,6 +133,83 @@ object TranscriptCodec {
         append(']')
         s.execution?.let { append(",\"execution\":").append(encodeExecution(it)) }
         append('}')
+    }
+
+    fun encodeOutcome(finished: Boolean, summary: String, endedAtMs: Long): String = buildString {
+        append('{')
+        append("\"type\":\"outcome\"")
+        append(",\"finished\":").append(finished)
+        append(",\"summary\":").append(js(summary))
+        append(",\"endedAtMs\":").append(endedAtMs)
+        append('}')
+    }
+
+    /**
+     * JSONL → [StoredTranscript]。第一行必须是任务头；解析不了的行（比如中途崩溃留下的半行）
+     * 跳过而不是让整份日志读不出来。没有任务头返回 null。
+     */
+    fun decode(lines: List<String>): StoredTranscript? {
+        var header: Map<*, *>? = null
+        val steps = ArrayList<StoredStep>()
+        var outcome: StoredOutcome? = null
+        for (line in lines) {
+            val m = MiniJson.parse(line) as? Map<*, *> ?: continue
+            when (m["type"]) {
+                "task" -> if (header == null) header = m
+                "step" -> decodeStep(m)?.let { steps.add(it) }
+                "outcome" -> outcome = StoredOutcome(
+                    finished = m["finished"] as? Boolean ?: false,
+                    summary = m["summary"] as? String ?: "",
+                    endedAtMs = (m["endedAtMs"] as? Long) ?: 0L,
+                )
+            }
+        }
+        val h = header ?: return null
+        return StoredTranscript(
+            taskId = h["taskId"] as? String ?: "",
+            task = h["task"] as? String ?: "",
+            model = h["model"] as? String ?: "",
+            startedAtMs = (h["startedAtMs"] as? Long) ?: 0L,
+            screenW = (h["screenW"] as? Long)?.toInt() ?: 0,
+            screenH = (h["screenH"] as? Long)?.toInt() ?: 0,
+            steps = steps,
+            outcome = outcome,
+        )
+    }
+
+    private fun decodeStep(m: Map<*, *>): StoredStep? {
+        val index = (m["index"] as? Long)?.toInt() ?: return null
+        val o = m["observation"] as? Map<*, *> ?: emptyMap<String, Any?>()
+        val replies = (m["replies"] as? List<*>)?.mapNotNull { r ->
+            val rm = r as? Map<*, *> ?: return@mapNotNull null
+            StoredReply(
+                note = rm["note"] as? String ?: "",
+                toolCalls = (rm["toolCalls"] as? List<*>)?.mapNotNull { c ->
+                    val cm = c as? Map<*, *> ?: return@mapNotNull null
+                    ToolCall(cm["id"] as? String ?: "", cm["name"] as? String ?: "", cm["arguments"] as? String ?: "{}")
+                } ?: emptyList(),
+                finishReason = rm["finishReason"] as? String,
+                reasoningTokens = (rm["reasoningTokens"] as? Long)?.toInt(),
+                latencyMs = (rm["latencyMs"] as? Long) ?: 0L,
+            )
+        } ?: emptyList()
+        val execution = (m["execution"] as? Map<*, *>)?.let { e ->
+            StoredExecution(
+                action = e["action"] as? String,
+                ok = e["ok"] as? Boolean ?: false,
+                result = e["result"] as? String ?: "",
+                costMs = (e["costMs"] as? Long) ?: 0L,
+            )
+        }
+        return StoredStep(
+            index = index,
+            screenshotPath = o["screenshotPath"] as? String,
+            nodeCount = (o["nodeCount"] as? Long)?.toInt() ?: 0,
+            nodesBlock = o["nodesBlock"] as? String ?: "",
+            dumpError = o["dumpError"] as? String,
+            replies = replies,
+            execution = execution,
+        )
     }
 
     private fun encodeObservation(o: Observation): String = buildString {

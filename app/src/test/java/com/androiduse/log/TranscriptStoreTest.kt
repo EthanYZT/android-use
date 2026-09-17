@@ -4,13 +4,14 @@ import com.androiduse.agent.Observation
 import com.androiduse.agent.Step
 import com.androiduse.agent.Transcript
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 import java.util.Base64
 
-/** Transcript 落盘：每个任务一个目录，transcript.jsonl 每步一行，截图单独成文件。 */
+/** Transcript 落盘：每个任务一个目录，transcript.jsonl 每步一行，截图单独成文件；能列出、能读回。 */
 class TranscriptStoreTest {
 
     @Test
@@ -38,5 +39,28 @@ class TranscriptStoreTest {
         assertEquals(5, shot.length())
         assertEquals(shot.absolutePath, path)
         assertTrue(lines[1].contains("step-1.jpg"))
+    }
+
+    @Test
+    fun outcomeIsAppendedAndListLoadReadBackNewestFirst() {
+        val root = Files.createTempDirectory("aud").toFile()
+        val store = TranscriptStore(root)
+        val older = Transcript("task-1", "旧任务", "glm", 1_000L, 1080, 2376)
+        store.start(older)
+        store.step(older, Step(1, Observation(null, null, emptyList(), "", null)))
+        store.outcome(older, finished = false, summary = "达到最大步数")
+
+        val newer = Transcript("task-2", "新任务", "glm", 2_000L, 1080, 2376)
+        store.start(newer)
+        store.outcome(newer, finished = true, summary = "完成")
+
+        val list = store.list()
+        assertEquals(listOf("task-2", "task-1"), list.map { it.taskId })
+        assertEquals("完成", list[0].outcome!!.summary)
+        assertEquals(1, list[1].steps.size)
+        assertEquals(false, list[1].outcome!!.finished)
+
+        assertEquals("旧任务", store.load("task-1")!!.task)
+        assertNull(store.load("nope"))
     }
 }

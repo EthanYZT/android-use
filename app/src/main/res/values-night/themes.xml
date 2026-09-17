@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AndroidUse" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/au_primary</item>
+        <item name="colorOnPrimary">@color/au_on_primary</item>
+        <item name="colorPrimaryContainer">@color/au_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/au_on_primary_container</item>
+        <item name="colorPrimaryInverse">@color/au_primary_inverse</item>
+
+        <item name="colorSecondary">@color/au_secondary</item>
+        <item name="colorOnSecondary">@color/au_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/au_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/au_on_secondary_container</item>
+
+        <item name="colorTertiary">@color/au_tertiary</item>
+        <item name="colorOnTertiary">@color/au_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/au_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/au_on_tertiary_container</item>
+
+        <item name="colorError">@color/au_error</item>
+        <item name="colorOnError">@color/au_on_error</item>
+        <item name="colorErrorContainer">@color/au_error_container</item>
+        <item name="colorOnErrorContainer">@color/au_on_error_container</item>
+
+        <item name="android:colorBackground">@color/au_background</item>
+        <item name="colorOnBackground">@color/au_on_background</item>
+        <item name="colorSurface">@color/au_surface</item>
+        <item name="colorOnSurface">@color/au_on_surface</item>
+        <item name="colorSurfaceVariant">@color/au_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/au_on_surface_variant</item>
+        <item name="colorSurfaceInverse">@color/au_surface_inverse</item>
+        <item name="colorOnSurfaceInverse">@color/au_on_surface_inverse</item>
+        <item name="colorSurfaceDim">@color/au_surface_dim</item>
+        <item name="colorSurfaceBright">@color/au_surface_bright</item>
+        <item name="colorSurfaceContainerLowest">@color/au_surface_container_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/au_surface_container_low</item>
+        <item name="colorSurfaceContainer">@color/au_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/au_surface_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/au_surface_container_highest</item>
+        <item name="colorOutline">@color/au_outline</item>
+        <item name="colorOutlineVariant">@color/au_outline_variant</item>
+
+        <item name="android:statusBarColor">@color/au_surface</item>
+        <item name="android:navigationBarColor">@color/au_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+
+        <item name="toolbarStyle">@style/Widget.AndroidUse.Toolbar</item>
+        <item name="materialCardViewStyle">@style/Widget.AndroidUse.Card</item>
+    </style>
+</resources>

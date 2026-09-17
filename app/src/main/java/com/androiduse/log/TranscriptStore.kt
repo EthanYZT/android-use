@@ -1,6 +1,7 @@
 package com.androiduse.log
 
 import com.androiduse.agent.Step
+import com.androiduse.agent.StoredTranscript
 import com.androiduse.agent.Transcript
 import com.androiduse.agent.TranscriptCodec
 import com.androiduse.agent.TranscriptSink
@@ -33,5 +34,21 @@ class TranscriptStore(private val root: File) : TranscriptSink {
 
     override fun step(t: Transcript, step: Step) {
         file(t).appendText(TranscriptCodec.encodeStep(step) + "\n")
+    }
+
+    override fun outcome(t: Transcript, finished: Boolean, summary: String) {
+        file(t).appendText(TranscriptCodec.encodeOutcome(finished, summary, System.currentTimeMillis()) + "\n")
+    }
+
+    /** 所有任务，最新的在前。读不出来的目录跳过。 */
+    fun list(): List<StoredTranscript> =
+        (root.listFiles { f -> f.isDirectory } ?: emptyArray())
+            .mapNotNull { load(it.name) }
+            .sortedByDescending { it.startedAtMs }
+
+    fun load(taskId: String): StoredTranscript? {
+        val f = File(File(root, taskId), "transcript.jsonl")
+        if (!f.isFile) return null
+        return TranscriptCodec.decode(f.readLines())
     }
 }
