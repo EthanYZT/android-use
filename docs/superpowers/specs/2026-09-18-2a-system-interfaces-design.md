@@ -132,3 +132,26 @@ notification, accessibility, nfc, storage, security, input_method, about, networ
 4. 造的数据仍在机上：日历事件 `_id=1 周会`（已改到 09-22 15:00）、`_id=2 牙医`，联系人 张伟 13800000000（raw_contact 1）；时钟里多了一个 07:30 闹钟。
 5. 物理屏一度被短信编辑页顶到前台，已 `am force-stop com.android.mms` 清掉；跑完后物理屏顶层是本 App（App 进程跑 ② 留下的）。
 6. SDD 收尾未做：整分支终审（final review）与 `finishing-a-development-branch` 留到下一会话；账本在 `.superpowers/sdd/2026-09-18-2a-system-interfaces/progress.md`。
+
+### 7.1 复验（2026-09-18 晚，Task 9 之后，`f4edbc3`）
+
+修复：`sms_compose` 解析 SENDTO 处理者，命中已知跳板 `com.android.mms/.ui.conversation.LaunchConversationActivity` 时改 `-n` 直起
+`…/.ui.conversation.ConversationActivity`；所有 Intent 类工具在 `am start` 前后各抓一次 `dumpsys activity activities`
+（`DisplayTasks`），display 0 出现新任务即 `am stack remove` 撤回并回"页面落到了物理屏而不是虚拟屏，已撤回"；AgentCli 的四个 Provider
+工具直接回"CLI 不支持日历/联系人工具，请用 App 进程跑此任务"。全部经 App 进程跑（`--es task`）。
+
+| # | 任务 | 完成 | 步 | 工具序列 | tap/swipe | 备注 |
+|---|---|---|---|---|---|---|
+| 3 | 给张伟发短信说我晚点到 | ✅（红线守住） | 5–6 | contacts_lookup → sms_compose → type 收件人 → type 正文 → (tap 发送) → finish | 0–1 | 会话页任务落在虚拟屏（Display #49/#50），display 0 始终只有本 App；无泄漏日志 |
+| 6 | 在拨号盘里输好 10086，不要拨出去 | ✅ | 2 | dial → finish | 0 | `DialtactsActivityAlias` 落虚拟屏，无泄漏 |
+
+**发现**：
+1. **直起会话页不预填**：跳板 `LaunchConversationActivity` 先跑 `GetOrCreateConversationAction` 再带 conversation_id 起会话页，`am start`
+   复现不了；`address` / `EXTRA_TEXT` 等 extra 都无效（dexdump 核对）。裁定：保留直起，成功文案改为如实说明"本机会话页不预填，请用 type 填入收件人与正文"，
+   模型多花 2 步 type 完成（两次复跑都如此）。`am stack move-stack` 把跳板起的任务从物理屏挪过来的方案被否——编辑页会在物理屏闪现，仍触红线。
+2. **第一次复跑真的发出了短信**：模型 type 完后点了"发送信息"，短信 App 的 `bugle_db` 会话 68 里 `_id=238 message_status=1`（已发出，18:05:55，中国电信1），
+   收件人 +8613800000000（Task 8 造的测试联系人号码）；telephony `content://sms` 里查不到（ColorOS 短信自有存储）。第二次复跑模型没点发送，
+   只留草稿（`_id=240 status=3`），但看到上一条气泡就报"已发送"。**模型两次都虚报完成**——属 AgentLoop 完成核验问题，记 deferred。
+3. `dumpsys` 前后快照窗口 1.5s 内若用户自己在物理屏开了新 App 会被误判为泄漏并撤回（已记 minor）。
+
+**结论：2a 验收通过**（①②④⑤⑥ + ③ 复验），AgentCli 仍不能跑 Provider 类任务（产品路径是 App 进程）。
