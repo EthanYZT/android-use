@@ -210,3 +210,26 @@ headless 屏。**5 App 验收铺开时每跑完一轮要留意物理屏被顶上
 **效果（真机，计算器）**：「123 × 45」9 步 → 3 步（AC+6 键+等号一批 8 个动作）；「2026 − 1989 ÷ 2」两次失败 → 6 步完成。
 单测 186→193 绿。仍存在的失败模式：模型偶尔把同列相邻键的 id 看错（6↔3、6↔9），属模型选择错误，
 靠下一步观察自纠；不是 grounding 层问题。
+
+## 10. type 动作（2026-09-18，阶段 2 前置修补）
+
+**问题**：用户跑「打开今日头条/浏览器搜豆包手机」两个任务全部死在输入上——动作集里没有输入文字的工具，模型把搜索框点了十几次
+等键盘。而且**不可见虚拟屏上输入法窗口永远不会弹出**，`input text` 又不支持中文。
+
+**实现**：走守护进程已持有的 UiAutomation：协议 v2 加 `set_text`（displayId / 可选 nodeId / text / submit）；`TextInput` 找节点
+（按 dump 编号用与 `NodeExtractor` 完全相同的遍历顺序重数一遍找回；不给 id 则焦点/首个可编辑节点；点名的是容器则向下找
+可编辑子节点）→ `ACTION_FOCUS` → `ACTION_SET_TEXT` →（submit）`ACTION_IME_ENTER`。`NodeRecord.editable`（JSONL `edit`），
+`promptBlock` 打 ` edit`，`type` 工具声明，系统提示明说"这块屏永远不会弹键盘，直接 type，搜索用 submit=true"。
+`Injector` 对 `Action.Type` 走 `DaemonClient.setText`，失败原因经 `Environment.lastError()` 原样回给模型。单测 218 绿。
+
+**真机**：头条搜索页 `type{"text":"豆包手机","submit":true}` 成功；浏览器 `type{"id":6,…,"submit":true}` 后拿到百度结果页并
+finish（收集到努比亚 NaviX Ultra、定价、售罄等信息）。
+
+**顺带发现的两个稳定性问题（未处理，已取证）**：
+1. 头条在搜索提交后自己跳进"微头条发布页"（`AggrPublishActivity`）并在虚拟屏上**ANR**（`Input dispatching timed out`，
+   主线程 Waiting），被系统杀掉，虚拟屏露出底下的设置页；随后搜索结果页还把软件商店拉了起来。`dumpsys activity exit-info
+   com.ss.android.article.news` 可见 `reason=6 (ANR)`。疑与发布页要拉输入法/相机而虚拟屏没有有关。
+2. 浏览器在结果页一次普通 `swipe(500,700→500,300)` 后任务被移除（子进程 exit-info `REMOVE TASK`，主进程未死），虚拟屏同样
+   露出设置页；模型 open_app 后浏览器恢复到结果页继续完成。原因未明（导航模式是手势 2，但滑动不在边缘）。
+两次模型都靠 open_app 自恢复，但各吃掉 3–6 步。**取证手段**：`dumpsys activity exit-info <pkg>`、`/data/anr/`、实时 logcat；
+transcript 目前不存每步的时间戳，与系统日志对齐困难——建议给 Step 加 `startedAtMs`。
