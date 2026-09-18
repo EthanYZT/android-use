@@ -88,6 +88,7 @@ data class StoredStep(
     val nodeCount: Int,
     val nodesBlock: String,
     val dumpError: String?,
+    val ocrCount: Int = 0,
     val replies: List<StoredReply>,
     val execution: StoredExecution?,
     val executions: List<StoredExecution> = emptyList(),
@@ -110,6 +111,7 @@ fun Step.toStored(): StoredStep = StoredStep(
     nodeCount = observation.nodes.size,
     nodesBlock = observation.nodesBlock,
     dumpError = observation.dumpError,
+    ocrCount = observation.ocrCount,
     replies = replies.map { StoredReply(it.note, it.toolCalls, it.finishReason, it.reasoningTokens, it.latencyMs) },
     execution = execution?.let { StoredExecution(it.action?.toString(), it.ok, it.result, it.costMs) },
     executions = executions.map { StoredExecution(it.action?.toString(), it.ok, it.result, it.costMs) },
@@ -226,6 +228,7 @@ object TranscriptCodec {
             nodeCount = (o["nodeCount"] as? Long)?.toInt() ?: 0,
             nodesBlock = o["nodesBlock"] as? String ?: "",
             dumpError = o["dumpError"] as? String,
+            ocrCount = (o["ocrCount"] as? Long)?.toInt() ?: 0,
             replies = replies,
             execution = execution,
             executions = executions,
@@ -238,6 +241,7 @@ object TranscriptCodec {
         append(",\"nodeCount\":").append(o.nodes.size)
         append(",\"nodesBlock\":").append(js(o.nodesBlock))
         append(",\"dumpError\":").append(o.dumpError?.let { js(it) } ?: "null")
+        append(",\"ocrCount\":").append(o.ocrCount)
         append('}')
     }
 

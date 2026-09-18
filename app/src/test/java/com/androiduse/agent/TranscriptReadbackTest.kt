@@ -88,6 +88,16 @@ class TranscriptReadbackTest {
     }
 
     @Test
+    fun ocrCountRoundTrips() {
+        val t = sample()
+        val s = Step(3, Observation("IMG", null, emptyList(), "", null, ocrCount = 2))
+        t.steps.add(s)
+        val st = TranscriptCodec.decode(lines(t, withOutcome = false))!!.steps[2]
+        assertEquals(2, st.ocrCount)
+        assertEquals(st, s.toStored())
+    }
+
+    @Test
     fun legacyStepLineWithoutExecutionsDecodesToEmptyList() {
         val st = TranscriptCodec.decode(lines(sample(), withOutcome = false))!!.steps[0]
         assertTrue(st.executions.isEmpty())

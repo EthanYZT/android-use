@@ -47,7 +47,7 @@ class AndroidEnvironment(
             val t0 = System.currentTimeMillis()
             val lines = textReader.read(bmp)
             if (lines == null) ocrError = "识别失败或超时"
-            else merged = OcrMerge.merge(nodes, lines)
+            else merged = OcrMerge.merge(nodes, lines, screenW, screenH)
             Log.i(TAG, "ocr ${System.currentTimeMillis() - t0}ms lines=${lines?.size ?: -1} added=${merged.size - nodes.size}")
         }
         bmp?.recycle()
