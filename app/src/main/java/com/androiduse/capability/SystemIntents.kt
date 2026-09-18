@@ -27,7 +27,13 @@ object SystemIntents {
      * 值是 `am start -n` 用的组件。真机实测（2026-09-18 OnePlus Ace 5）：SENDTO 解析到
      * `LaunchConversationActivity`，它自己用 `NEW_TASK|NEW_DOCUMENT|CLEAR_TASK` 二次起
      * `ConversationActivity`，二次启动的新任务不认我们传的 `--display`，落到物理屏 0。
-     * 已知跳板直接起目标 Activity 可以绕开这一步。
+     * 已知跳板直接起目标 Activity 可以绕开这一步、把任务留在虚拟屏。
+     *
+     * ⚠️ 代价（同日真机复测确认）：直起不预填。跳板本来会先建一条会话记录、带着 `conversation_id`
+     * 再启动 `ConversationActivity`；直接 `am start -n` 没有这个 `conversation_id`，`-a SENDTO -d smsto:…`
+     * `--es sms_body …`、以及试过的 `address`/`android.intent.extra.TEXT` 都不生效——本机（ColorOS 15）
+     * 打开的是一个空白新建页，收件人和正文都要在界面里手动填。保留这些参数是因为其它 ROM 可能会认，
+     * 但 `successText` 必须如实告诉模型"没预填、要用 type 补"，不能再说"已填"。
      */
     val SMS_TRAMPOLINES: Map<String, String> = mapOf(
         "com.android.mms/com.android.mms.ui.conversation.LaunchConversationActivity" to "com.android.mms/.ui.conversation.ConversationActivity",
@@ -57,10 +63,16 @@ object SystemIntents {
         }
     }
 
-    /** 成功时回给模型的文案。Intent 只是"发出去了"，措辞不承诺目标 App 的结果。 */
-    fun successText(call: SystemCall, mapPackage: String?): String = when (call) {
+    /**
+     * 成功时回给模型的文案。Intent 只是"发出去了"，措辞不承诺目标 App 的结果。
+     * [smsComponent] 非 null 表示 `SmsCompose` 走了 [SMS_TRAMPOLINES] 直起（本机 ColorOS 15 实测不预填），
+     * 文案必须如实说明、引导模型改用 type 手动填，不能再说"已填"。
+     */
+    fun successText(call: SystemCall, mapPackage: String?, smsComponent: String? = null): String = when (call) {
         is SystemCall.SetAlarm -> "已请求时钟设置 %02d:%02d 闹钟；要核对可 open_app 时钟".format(call.hour, call.minute)
-        is SystemCall.SmsCompose -> "已打开短信编辑页，收件人与正文已填，尚未发送"
+        is SystemCall.SmsCompose -> if (smsComponent != null)
+            "已打开短信新建页，但本机会话页不预填：请用 type 在界面填入收件人 ${call.number} 和正文，再点发送"
+            else "已打开短信编辑页，收件人与正文已填，尚未发送"
         is SystemCall.Dial -> "已打开拨号盘并填入号码，未拨出"
         is SystemCall.Navigate -> if (mapPackage != null) "已在${MapApps.label(mapPackage)}打开 ${call.query}"
             else "已打开地图 ${call.query}（系统弹出了选择器，需要点一个地图 App）"

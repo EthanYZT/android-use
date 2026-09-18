@@ -78,15 +78,20 @@ class SystemInterfaces(
         val r = RootShell.execArgv(argv)
         if (!r.ok) return SystemResult(false, "启动失败: ${(r.stderr.ifBlank { r.stdout }).take(120)}")
         Thread.sleep(Injector.jitter(INTENT_SETTLE_MS))
-        // 落屏核对：对所有 Intent 类工具生效。dumpsys 拿不到输出时 parse 得空 map，
-        // leakedToPhysical 自然为空——不因核对本身失败而拦截启动，但要留一条日志。
-        val leaked = DisplayTasks.leakedToPhysical(before, DisplayTasks.parse(dumpActivities()))
+        // 落屏核对：对所有 Intent 类工具生效。dumpsys 拿不到输出（本次或起 Intent 之前那次）时对应
+        // map 里没有 display 0 这个 key——核对本身跑不动，不因此拦截启动，但要 Log.w 一条留痕，
+        // 否则「悄悄没查」和「查了确认没泄漏」在日志里没法区分。
+        val after = DisplayTasks.parse(dumpActivities())
+        if (0 !in before || 0 !in after) {
+            Log.w(TAG, "display leak check unavailable (dumpsys failed): call=$call")
+        }
+        val leaked = DisplayTasks.leakedToPhysical(before, after)
         if (leaked.isNotEmpty()) {
             leaked.forEach { RootShell.execArgv(listOf("am", "stack", "remove", it.toString())) } // 尽力撤回，不看结果
             Log.w(TAG, "intent leaked to display 0: tasks=$leaked call=$call")
             return SystemResult(false, "页面落到了物理屏而不是虚拟屏，已撤回；请改用界面操作完成")
         }
-        return SystemResult(true, SystemIntents.successText(call, mapPackage))
+        return SystemResult(true, SystemIntents.successText(call, mapPackage, smsComponent))
     }
 
     private fun dumpActivities(): String = RootShell.execArgv(listOf("dumpsys", "activity", "activities")).stdout

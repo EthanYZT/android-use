@@ -45,6 +45,23 @@ class SystemIntentsTest {
         assertTrue(argv.none { it == "-p" })
     }
 
+    @Test fun smsSuccessTextIsHonestAboutPrefillDependingOnPath() {
+        // 走已知跳板直起：本机（ColorOS 15）实测不预填，文案必须如实说明、带号码、引导 type 补填。
+        assertEquals(
+            "已打开短信新建页，但本机会话页不预填：请用 type 在界面填入收件人 13800000000 和正文，再点发送",
+            SystemIntents.successText(SystemCall.SmsCompose("13800000000", "我晚点到"), null, "com.android.mms/.ui.conversation.ConversationActivity"),
+        )
+        // 未命中跳板（-p 交给系统解析）：维持原文案，不改行为。
+        assertEquals(
+            "已打开短信编辑页，收件人与正文已填，尚未发送",
+            SystemIntents.successText(SystemCall.SmsCompose("1", "x"), null),
+        )
+        assertEquals(
+            "已打开短信编辑页，收件人与正文已填，尚未发送",
+            SystemIntents.successText(SystemCall.SmsCompose("1", "x"), null, null),
+        )
+    }
+
     @Test fun dialDoesNotCall() {
         val argv = SystemIntents.argv(SystemCall.Dial("10086"), 7, null)!!
         assertTrue(argv.containsAll(listOf("-a", "android.intent.action.DIAL", "-d", "tel:10086")))
