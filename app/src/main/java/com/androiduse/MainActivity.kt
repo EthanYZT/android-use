@@ -96,8 +96,15 @@ class MainActivity : AppCompatActivity() {
         }
         binding.tilTask.error = null
 
+        // 前台服务 + 通知：否则切后台 5 秒即被 HANS 冻结断网（见 AgentForegroundService）。通知权限没给也照样起服务，只是不显示。
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+        AgentForegroundService.start(this, task)
         job = lifecycleScope.launch {
             setRunning(true)
+            // Doze 白名单：ColorOS 的 HANS 只认这个，前台服务单独不够（见 BackgroundExemption）。root 一次性自授。
+            withContext(Dispatchers.IO) { com.androiduse.power.BackgroundExemption.ensure(applicationContext) }
             adapter.submit(emptyList())
             binding.tvResult.visibility = View.GONE
             try {
@@ -138,6 +145,7 @@ class MainActivity : AppCompatActivity() {
                 showResult(null)
             } finally {
                 setRunning(false)
+                AgentForegroundService.stop(this@MainActivity)
             }
         }
     }

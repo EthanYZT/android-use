@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 任务运行期间的前台服务：不加，App 一切后台 5 秒就被 ColorOS HANS 冻结+断网，模型请求中止（AgentForegroundService）。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 2a：日历/联系人 Provider 直读直写。未授权时由 root `pm grant` 自授（PermissionGrant），不弹系统权限框。 -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -35,6 +39,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".AgentForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="on-device automation agent running a user task on a virtual display" />
+        </service>
         <activity
             android:name=".HistoryActivity"
             android:exported="false"

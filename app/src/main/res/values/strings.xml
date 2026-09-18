@@ -19,6 +19,9 @@
     <string name="result_finished">✓ 任务完成</string>
     <string name="result_unfinished">✗ 未完成</string>
     <string name="action_takeover">在手机上继续</string>
+    <string name="notif_channel_task">任务运行中</string>
+    <string name="notif_channel_task_desc">任务执行期间保持 App 在前台服务状态，防止系统冻结和断网</string>
+    <string name="notif_task_running">Android Use 正在执行任务</string>
     <string name="status_taking_over">正在切换到手机屏幕…</string>
     <string name="result_handoff">⇥ 已交接</string>
 
