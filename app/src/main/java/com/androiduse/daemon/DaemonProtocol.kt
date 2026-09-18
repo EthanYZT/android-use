@@ -14,6 +14,8 @@ object DaemonProtocol {
         data class Dump(val displayId: Int) : Request()
         /** 响应后连接保持打开；守护进程读到 EOF 即销屏。 */
         data object Lease : Request()
+        /** 往可编辑节点写入文字（无障碍 ACTION_SET_TEXT，支持中文、不依赖输入法）。nodeId 为空则找焦点/首个可编辑节点。 */
+        data class SetText(val displayId: Int, val nodeId: Int?, val text: String, val submit: Boolean) : Request()
     }
 
     const val DEFAULT_MAX_WIDTH = 720
@@ -36,6 +38,11 @@ object DaemonProtocol {
             )
             "dump" -> Request.Dump(DumpCodec.intField(s, "displayId") ?: return null)
             "lease" -> Request.Lease
+            "set_text" -> {
+                val displayId = DumpCodec.intField(s, "displayId") ?: return null
+                val text = DumpCodec.strField(s, "text") ?: return null
+                Request.SetText(displayId, DumpCodec.intField(s, "nodeId"), text, DumpCodec.boolField(s, "submit") ?: false)
+            }
             else -> null
         }
     }
@@ -45,6 +52,9 @@ object DaemonProtocol {
     fun encodeFrame(maxWidth: Int = DEFAULT_MAX_WIDTH, quality: Int = DEFAULT_QUALITY) =
         """{"cmd":"frame","maxWidth":$maxWidth,"quality":$quality}"""
     fun encodeLease() = """{"cmd":"lease"}"""
+    fun encodeSetText(displayId: Int, nodeId: Int?, text: String, submit: Boolean) =
+        """{"cmd":"set_text","displayId":$displayId""" + (nodeId?.let { ""","nodeId":$it""" } ?: "") +
+            ""","text":${DumpCodec.jsonStr(text)},"submit":$submit}"""
 
     fun encodeCreateOk(displayId: Int, w: Int, h: Int) = """{"ok":true,"displayId":$displayId,"w":$w,"h":$h}"""
     fun encodeOk() = """{"ok":true}"""

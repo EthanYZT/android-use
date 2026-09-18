@@ -111,6 +111,12 @@ object DaemonClient : DisplayService {
      * 会把物理屏后台已有的设置任务**搬到**虚拟屏（首帧停在用户上次看的 WLAN 页），销屏时连同用户的
      * 任务一起销毁。与 open_app（ActionCommand.openAppArgv）同一条规则。
      */
+    /** type 动作：走守护进程的无障碍 ACTION_SET_TEXT。失败返回错误文本，成功 null。 */
+    fun setText(displayId: Int, nodeId: Int?, text: String, submit: Boolean): String? {
+        val line = rawRequest(DaemonProtocol.encodeSetText(displayId, nodeId, text, submit)) ?: return "daemon unreachable"
+        return DaemonProtocol.parseSimpleResponse(line)
+    }
+
     override fun launchSettings(displayId: Int): Boolean =
         RootShell.execArgv(listOf("am", "start", "--display", displayId.toString(), "-a", "android.settings.SETTINGS", "-f", "0x18000000")).ok
 

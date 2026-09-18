@@ -126,4 +126,16 @@ class DumpCodecResponseTest {
         org.junit.Assert.assertEquals("a}b]c{d", ok.nodes[0].text)
         org.junit.Assert.assertEquals(1, ok.nodes.size)
     }
+
+    @Test
+    fun editableFlagRoundTripsAndDefaultsToFalse() {
+        val n = DumpCodec.NodeRecord(4, 0, 0, 100, 50, "搜索", "", "", "android.widget.EditText", true, false, editable = true)
+        val out = DumpCodec.encodeOk(1, listOf(n))
+        assertTrue(out, out.contains("\"edit\":true"))
+        val back = (DumpCodec.parseResponse(out) as DumpCodec.DumpResult.Ok).nodes[0]
+        assertTrue(back.editable)
+        // 旧格式没有 edit 字段 → false
+        val legacy = (DumpCodec.parseResponse("""{"ok":true,"displayId":1,"nodes":[{"id":0,"b":[0,0,1,1],"text":"","desc":"","resId":"","cls":"","click":false,"scroll":false}]}""") as DumpCodec.DumpResult.Ok).nodes[0]
+        assertTrue(!legacy.editable)
+    }
 }

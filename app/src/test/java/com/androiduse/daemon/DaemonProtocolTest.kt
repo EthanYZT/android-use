@@ -68,4 +68,13 @@ class DaemonProtocolTest {
         assertEquals(DaemonProtocol.FrameResult.Err("x"), DaemonProtocol.parseFrameResponse(DumpCodec.encodeError("x")))
         assertTrue(DaemonProtocol.parseFrameResponse("""{"ok":true}""") is DaemonProtocol.FrameResult.Err) // 既无 jpeg 也无 empty
     }
+
+    @Test
+    fun setTextRequestRoundTripsWithOptionalNodeIdAndSubmit() {
+        val full = DaemonProtocol.Request.SetText(9, 12, "豆包手机", true)
+        assertEquals(full, DaemonProtocol.parseRequest(DaemonProtocol.encodeSetText(9, 12, "豆包手机", true)))
+        val noId = DaemonProtocol.Request.SetText(9, null, "a\"b", false)
+        assertEquals(noId, DaemonProtocol.parseRequest(DaemonProtocol.encodeSetText(9, null, "a\"b", false)))
+        assertNull(DaemonProtocol.parseRequest("""{"cmd":"set_text","displayId":9}""")) // 缺 text
+    }
 }

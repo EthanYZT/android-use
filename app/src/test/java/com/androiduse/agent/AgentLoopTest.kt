@@ -39,6 +39,8 @@ class AgentLoopTest {
         override val screenH = 2000
         val performed = mutableListOf<Action>()
         var refreshCount = 0
+        var lastError: String? = null
+        override fun lastError(): String? = lastError
         override fun installedApps(): List<AppEntry> = apps
         override fun refreshNodes(): List<NodeRecord>? { refreshCount++; return refresh?.invoke() }
         var ocrCount = 0
@@ -298,6 +300,20 @@ class AgentLoopTest {
         val client = ArkChatClient("k", "u", transport = { ArkChatClient.HttpResult(200, queue.removeAt(0)) })
         runBlocking { AgentLoop(client, env, "glm", FakeSink()).run("t", 5) { lines += it } }
         assertTrue(lines.joinToString("\n"), lines.any { it.contains("Observe") && it.contains("ocr+2") })
+    }
+
+    @Test
+    fun environmentErrorTextIsFedBackToModelInsteadOfGenericFailure() {
+        val env = FakeEnv({ listOf(node(7, "x")) }, performOk = false).apply { lastError = "屏幕上没有可输入的文本框" }
+        val (o, _, sent) = harness(
+            toolReply("输入", "type" to """{"text":"豆包"}"""),
+            toolReply("改点搜索", "tap" to """{"id":7}"""),
+            toolReply("完成", "finish" to """{"summary":"s"}"""),
+            env = env,
+        )
+        assertFalse(o.transcript.steps[0].executions[0].ok)
+        assertTrue(o.transcript.steps[0].executions[0].result.contains("没有可输入"))
+        assertTrue(sent[1].contains("没有可输入"))
     }
 
     @Test

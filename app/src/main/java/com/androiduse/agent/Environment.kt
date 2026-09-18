@@ -16,6 +16,9 @@ interface Environment {
     /** 执行动作，返回注入是否成功。 */
     fun perform(action: Action): Boolean
 
+    /** 最近一次 perform 失败的原因文本（如守护进程对 type 的拒绝理由），回给模型；没有则 null。 */
+    fun lastError(): String? = null
+
     /**
      * 桌面可启动的 App（显示名 + 启动组件），供 open_app 按名字解析。任务开始时取一次，
      * 记进 Transcript 后整个任务不变。查不到（无 Context 等）返回空列表，open_app 即不可用。

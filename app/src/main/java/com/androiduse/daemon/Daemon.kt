@@ -111,6 +111,17 @@ object Daemon {
             } catch (e: Throwable) {
                 DumpCodec.encodeError("frame failed: $e")
             })
+            is DaemonProtocol.Request.SetText -> reply(try {
+                val automation = ensureConnected()
+                try { automation.waitForIdle(200L, 1500L) } catch (_: Throwable) {}
+                when (val r = TextInput.setText(automation, req.displayId, req.nodeId, req.text, req.submit)) {
+                    TextInput.Result.Ok -> DaemonProtocol.encodeOk()
+                    is TextInput.Result.Err -> DumpCodec.encodeError(r.message)
+                }
+            } catch (e: Throwable) {
+                resetConnection()
+                DumpCodec.encodeError("set_text failed: $e")
+            })
             DaemonProtocol.Request.Lease -> {
                 // 租约：响应后连接保持打开，读到 EOF（App 关闭或进程死亡）即销屏。旧租约被替换后的 EOF 不销屏。
                 val token = leases.open()

@@ -99,4 +99,19 @@ class ToolCallResolverTest {
     fun openAppWithEmptyCatalogIsError() {
         assertTrue(ToolCallResolver.resolve(ToolCall("c", "open_app", """{"name":"时钟"}"""), nodes, w, h, emptyList()) is ToolCallResolver.Resolution.Err)
     }
+
+    @Test
+    fun typeResolvesTextWithOptionalIdAndSubmit() {
+        assertEquals(Action.Type("豆包手机", 7, true),
+            ok(ToolCallResolver.resolve(ToolCall("c", "type", """{"text":"豆包手机","id":7,"submit":true}"""), nodes, w, h)))
+        assertEquals(Action.Type("hi", null, false),
+            ok(ToolCallResolver.resolve(ToolCall("c", "type", """{"text":"hi"}"""), nodes, w, h)))
+    }
+
+    @Test
+    fun typeWithoutTextOrUnknownIdIsError() {
+        assertTrue(ToolCallResolver.resolve(ToolCall("c", "type", "{}"), nodes, w, h) is ToolCallResolver.Resolution.Err)
+        val r = ToolCallResolver.resolve(ToolCall("c", "type", """{"text":"x","id":99}"""), nodes, w, h)
+        assertTrue(err(r), err(r).contains("99"))
+    }
 }

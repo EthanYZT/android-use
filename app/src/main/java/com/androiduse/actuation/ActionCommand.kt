@@ -46,6 +46,8 @@ object ActionCommand {
             is Action.Finish -> null
             // OpenApp 只有 argv 形态（见 openAppArgv）；Injector 在走 toShell 之前单独处理它。
             is Action.OpenApp -> null
+            // Type 走守护进程无障碍接口，不产生 shell 命令；Injector 单独处理。
+            is Action.Type -> null
         }
     }
 

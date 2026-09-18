@@ -1,6 +1,7 @@
 package com.androiduse.actuation
 
 import com.androiduse.display.VirtualScreen
+import com.androiduse.root.DaemonClient
 import com.androiduse.root.RootShell
 import kotlin.random.Random
 
@@ -14,11 +15,19 @@ object Injector {
 
     private const val BASE_SETTLE_MS = 600L
 
+    /** 最近一次 Type 失败的原因（守护进程给的文本），供 AgentLoop 回给模型。成功为 null。 */
+    @Volatile var lastTypeError: String? = null
+
     /** 起 App 比点一下慢得多：冷启动 + 首帧渲染，等久一点下一步截图才不是空白/启动页。 */
     private const val OPEN_APP_SETTLE_MS = 1500L
 
     fun perform(action: Action, screen: VirtualScreen): Boolean {
         if (action is Action.Finish) return true
+        if (action is Action.Type) {
+            lastTypeError = DaemonClient.setText(screen.logicalDisplayId, action.nodeId, action.text, action.submit)
+            if (lastTypeError == null) Thread.sleep(jitter(BASE_SETTLE_MS))
+            return lastTypeError == null
+        }
         if (action is Action.OpenApp) {
             // am start 找不到组件或被系统拒绝时退出码非 0，ok=false 会作为"注入失败"反馈给模型。
             val ok = RootShell.execArgv(ActionCommand.openAppArgv(action, screen)).ok

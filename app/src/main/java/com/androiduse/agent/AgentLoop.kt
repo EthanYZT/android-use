@@ -122,7 +122,7 @@ class AgentLoop(
                             Execution(action, true, "finish", System.currentTimeMillis() - c0)
                         } else {
                             val ok = env.perform(action)
-                            Execution(action, ok, if (ok) "ok" else "注入失败", System.currentTimeMillis() - c0)
+                            Execution(action, ok, if (ok) "ok" else (env.lastError() ?: "注入失败"), System.currentTimeMillis() - c0)
                         }
                     }
                 }

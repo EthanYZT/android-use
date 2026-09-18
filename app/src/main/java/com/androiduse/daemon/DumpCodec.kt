@@ -25,6 +25,8 @@ object DumpCodec {
         val className: String,
         val clickable: Boolean,
         val scrollable: Boolean,
+        /** 可输入文字（EditText / 网页输入框）。type 动作的目标；默认 false 兼容旧记录。 */
+        val editable: Boolean = false,
     )
 
     /** dump 请求。displayId 是逻辑屏 id（虚拟屏）。 */
@@ -158,6 +160,7 @@ object DumpCodec {
             className = strField(obj, "cls").orEmpty(),
             clickable = boolField(obj, "click") ?: false,
             scrollable = boolField(obj, "scroll") ?: false,
+            editable = boolField(obj, "edit") ?: false,
         )
     }
 
@@ -185,6 +188,7 @@ object DumpCodec {
         append(",\"cls\":").append(jsonStr(n.className))
         append(",\"click\":").append(n.clickable)
         append(",\"scroll\":").append(n.scrollable)
+        if (n.editable) append(",\"edit\":true")
         append('}')
     }
 

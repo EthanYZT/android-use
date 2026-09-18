@@ -64,6 +64,13 @@ object ToolCallResolver {
                     ?: return Resolution.Err("没有名为 ${UntrustedText.sanitize(name)} 的 App。可用：${AppCatalog.promptList(apps)}")
                 Resolution.Ok(Action.OpenApp(app.label, app.component))
             }
+            "type" -> {
+                val text = ResponseParser.field(a, "text") ?: return Resolution.Err("type 需要 text")
+                val id = ResponseParser.intField(a, "id")
+                if (id != null && nodes.none { it.id == id }) return Resolution.Err("id $id 不在当前元素列表里，请重新查看列表；不传 id 会写入当前焦点的输入框")
+                val submit = a.contains("\"submit\":true") || a.contains("\"submit\": true")
+                Resolution.Ok(Action.Type(text, id, submit))
+            }
             "wait" -> Resolution.Ok(Action.Wait(Action.Wait.clamp(ResponseParser.intField(a, "ms") ?: 500)))
             "finish" -> Resolution.Ok(Action.Finish(ResponseParser.field(a, "summary") ?: ""))
             else -> Resolution.Err("没有名为 ${call.name.take(30)} 的工具")

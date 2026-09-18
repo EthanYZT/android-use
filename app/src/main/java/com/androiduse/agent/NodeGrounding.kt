@@ -47,6 +47,7 @@ object NodeGrounding {
             sb.append('#').append(n.id).append(" (").append(c.first).append(',').append(c.second).append(')')
             if (n.clickable) sb.append(" click")
             if (n.scrollable) sb.append(" scroll")
+            if (n.editable) sb.append(" edit")
             if (n.className == OcrMerge.OCR_CLASS) sb.append(" ocr")
             if (n.text.isNotEmpty()) sb.append(' ').append(UntrustedText.field("text", n.text))
             if (n.desc.isNotEmpty()) sb.append(' ').append(UntrustedText.field("desc", n.desc))

@@ -65,4 +65,10 @@ class ActionCommandTest {
         // OpenApp 只有 argv 形态；Injector 必须在走 toShell 之前单独处理它。
         assertNull(ActionCommand.toShell(Action.OpenApp("时钟", "com.oplus.alarmclock/.AlarmClock"), screen))
     }
+
+    @Test
+    fun typeProducesNoShellCommand() {
+        // 文字输入走守护进程的无障碍 ACTION_SET_TEXT（支持中文、不依赖输入法），不是 input text。
+        assertNull(ActionCommand.toShell(Action.Type("豆包", null, false), screen))
+    }
 }

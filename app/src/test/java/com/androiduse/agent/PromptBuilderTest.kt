@@ -231,6 +231,19 @@ class PromptBuilderTest {
     }
 
     @Test
+    fun toolsDeclareTypeWithTextIdAndSubmit() {
+        val tools = PromptBuilder.toolsJson()
+        assertTrue(tools.contains("\"name\":\"type\""))
+        assertTrue(tools.contains("\"submit\":{\"type\":\"boolean\""))
+    }
+
+    @Test
+    fun systemPromptTellsModelToTypeInsteadOfWaitingForKeyboard() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains("type") && p.contains("键盘"))
+    }
+
+    @Test
     fun jsonStringEscapesQuotesBackslashesNewlinesAndControlChars() {
         assertEquals("\"a\\\"b\"", PromptBuilder.jsonString("a\"b"))
         assertEquals("\"a\\\\b\"", PromptBuilder.jsonString("a\\b"))

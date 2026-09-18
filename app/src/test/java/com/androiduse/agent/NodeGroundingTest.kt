@@ -158,4 +158,11 @@ class NodeGroundingTest {
         val moved = listOf(ocr(41, "爱学A", 700, 1300))
         assertEquals(NodeGrounding.centerNorm(moved[0], W, H)!!.second, NodeGrounding.relocate(40, list, moved, W, H)!!.yNorm)
     }
+
+    @Test
+    fun promptBlock_marksEditableNodes() {
+        val e = NodeRecord(5, 0, 100, 1080, 200, "搜索框", "", "", "android.widget.EditText", true, false, editable = true)
+        val block = NodeGrounding.promptBlock(listOf(e), W, H)
+        assertTrue(block, block.contains(" click edit text=\"搜索框\""))
+    }
 }

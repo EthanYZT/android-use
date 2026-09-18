@@ -34,8 +34,9 @@ object NodeExtractor {
         val desc = node.contentDescription?.toString().orEmpty()
         val clickable = node.isClickable
         val scrollable = node.isScrollable
+        val editable = node.isEditable
 
-        val interesting = clickable || scrollable || text.isNotEmpty() || desc.isNotEmpty()
+        val interesting = clickable || scrollable || editable || text.isNotEmpty() || desc.isNotEmpty()
         if (interesting) {
             val b = Rect()
             node.getBoundsInScreen(b)
@@ -49,6 +50,7 @@ object NodeExtractor {
                     className = node.className?.toString().orEmpty(),
                     clickable = clickable,
                     scrollable = scrollable,
+                    editable = editable,
                 )
             )
         }
@@ -56,5 +58,47 @@ object NodeExtractor {
             val child = node.getChild(i) ?: continue
             walk(child, out, counter)
         }
+    }
+
+    /**
+     * 按 dump 时的编号找回节点：用与 [extractForDisplay] **完全相同**的遍历与过滤顺序重新数一遍。
+     * 树若已变化，编号可能指向别的节点——调用方（set_text）只在紧接一次 dump 之后用它。
+     */
+    fun findNode(ua: UiAutomation, displayId: Int, id: Int): AccessibilityNodeInfo? {
+        val windows = ua.windowsOnAllDisplays.get(displayId) ?: return null
+        val counter = intArrayOf(0)
+        for (w in windows) {
+            val root = w.root ?: continue
+            findInSubtree(root, id, counter)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findInSubtree(node: AccessibilityNodeInfo, id: Int, counter: IntArray): AccessibilityNodeInfo? {
+        val text = node.text?.toString().orEmpty()
+        val desc = node.contentDescription?.toString().orEmpty()
+        val interesting = node.isClickable || node.isScrollable || node.isEditable || text.isNotEmpty() || desc.isNotEmpty()
+        if (interesting) { if (counter[0] == id) return node; counter[0]++ }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findInSubtree(child, id, counter)?.let { return it }
+        }
+        return null
+    }
+
+    /** 屏上当前有焦点的可编辑节点；没有则第一个可编辑节点；都没有 → null。 */
+    fun findEditable(ua: UiAutomation, displayId: Int): AccessibilityNodeInfo? {
+        val windows = ua.windowsOnAllDisplays.get(displayId) ?: return null
+        var first: AccessibilityNodeInfo? = null
+        fun walk(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (n.isEditable) {
+                if (n.isFocused) return n
+                if (first == null) first = n
+            }
+            for (i in 0 until n.childCount) { walk(n.getChild(i) ?: continue)?.let { return it } }
+            return null
+        }
+        for (w in windows) { walk(w.root ?: continue)?.let { return it } }
+        return first
     }
 }

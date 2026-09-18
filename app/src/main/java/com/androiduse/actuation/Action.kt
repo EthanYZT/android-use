@@ -34,6 +34,12 @@ sealed class Action {
      */
     data class OpenApp(val label: String, val component: String) : Action()
 
+    /**
+     * 往文本框输入文字。走守护进程的无障碍 ACTION_SET_TEXT（不可见虚拟屏上没有键盘，`input text` 不支持中文）。
+     * [nodeId] 为空则写入当前焦点/首个可编辑节点；[submit] 为 true 时输入后发 IME 回车触发搜索/确认。
+     */
+    data class Type(val text: String, val nodeId: Int?, val submit: Boolean) : Action()
+
     /** 任务完成。summary 是模型对结果的自述，用于日志与验收。 */
     data class Finish(val summary: String) : Action()
 }
