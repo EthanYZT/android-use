@@ -18,7 +18,44 @@ import com.androiduse.daemon.DumpCodec.NodeRecord
 object NodeGrounding {
 
     /** 提示词里最多列多少个节点，防止长页面把 token 撑爆。超出的靠截图视觉兜底。 */
-    const val MAX_NODES_IN_PROMPT = 60
+    const val MAX_NODES_IN_PROMPT = 80
+
+    /** 屏幕按归一化 y 分成几段，每段保底名额 = MAX / BANDS，保证底部栏/弹窗按钮不被上半屏挤掉。 */
+    const val BANDS = 3
+
+    /**
+     * 密页面（几百个节点）不能按树顺序硬截前 N 个——真机上高德详情页/美团规格弹窗的"导航""加入购物车"
+     * 都在树末尾，被截掉后模型只能凭截图猜坐标。选取规则：
+     * 1. 优先级：可输入 > 有文字的可点击 > 有文字/可滚动 > 无文字的可点击（同一中心只留一条）> 其余；
+     * 2. 每个屏幕分段先按优先级取保底名额，剩余名额再按优先级全局补；
+     * 3. 输出按屏幕阅读顺序（y 再 x）。id 不变，tap-by-id 照常。
+     */
+    fun selectForPrompt(nodes: List<NodeRecord>, screenW: Int, screenH: Int): List<NodeRecord> {
+        data class Cand(val node: NodeRecord, val xn: Int, val yn: Int, val prio: Int, val order: Int)
+        val cands = ArrayList<Cand>()
+        val seenBlankCenters = HashSet<Long>()
+        nodes.forEachIndexed { i, n ->
+            val c = centerNorm(n, screenW, screenH) ?: return@forEachIndexed
+            val labeled = n.text.isNotEmpty() || n.desc.isNotEmpty()
+            val prio = when {
+                n.editable -> 0
+                n.clickable && labeled -> 1
+                labeled || n.scrollable -> 2
+                n.clickable -> 3
+                else -> 4
+            }
+            if (prio == 3 && !seenBlankCenters.add(c.first.toLong() * 10_000 + c.second)) return@forEachIndexed
+            cands.add(Cand(n, c.first, c.second, prio, i))
+        }
+        val byPrio = compareBy<Cand>({ it.prio }, { it.order })
+        val quota = MAX_NODES_IN_PROMPT / BANDS
+        val chosen = LinkedHashSet<Cand>()
+        cands.groupBy { (it.yn * BANDS / 1001).coerceIn(0, BANDS - 1) }.values.forEach { band ->
+            band.sortedWith(byPrio).take(quota).forEach { chosen.add(it) }
+        }
+        cands.sortedWith(byPrio).forEach { if (chosen.size < MAX_NODES_IN_PROMPT) chosen.add(it) }
+        return chosen.sortedWith(compareBy({ it.yn }, { it.xn }, { it.order })).map { it.node }
+    }
 
     /**
      * 节点中心的归一化坐标（[0,1000]）。屏幕尺寸非法或 bounds 退化时返回 null。
@@ -40,9 +77,7 @@ object NodeGrounding {
      */
     fun promptBlock(nodes: List<NodeRecord>, screenW: Int, screenH: Int): String {
         val sb = StringBuilder()
-        var count = 0
-        for (n in nodes) {
-            if (count >= MAX_NODES_IN_PROMPT) break
+        for (n in selectForPrompt(nodes, screenW, screenH)) {
             val c = centerNorm(n, screenW, screenH) ?: continue
             sb.append('#').append(n.id).append(" (").append(c.first).append(',').append(c.second).append(')')
             if (n.clickable) sb.append(" click")
@@ -52,7 +87,6 @@ object NodeGrounding {
             if (n.text.isNotEmpty()) sb.append(' ').append(UntrustedText.field("text", n.text))
             if (n.desc.isNotEmpty()) sb.append(' ').append(UntrustedText.field("desc", n.desc))
             sb.append('\n')
-            count++
         }
         return sb.toString().trimEnd()
     }

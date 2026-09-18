@@ -101,6 +101,66 @@ class NodeGroundingTest {
         assertEquals(NodeGrounding.MAX_NODES_IN_PROMPT, block.split("\n").size)
     }
 
+
+    // ---- 选取规则：密页面不能按树顺序硬截，底部按钮/弹窗/输入框必须进列表 ----
+
+    private fun blankClick(id: Int, l: Int, t: Int, r: Int, b: Int) = n(id, l, t, r, b, click = true)
+
+    @Test
+    fun promptBlock_denseTree_bottomButtonWithTextIsStillListed() {
+        // 190 个顶部标签行 + 树末尾一个底部"加入购物车"按钮（美团规格弹窗的真实形态）
+        val top = (0 until 190).map { n(it, 0, it * 5, 1080, it * 5 + 4, text = "row$it") }
+        val button = n(190, 700, 1980, 1000, 2060, text = "加入购物车", click = true)
+        val block = NodeGrounding.promptBlock(top + button, W, H)
+        assertTrue(block, block.contains("#190 (") && block.contains("text=\"加入购物车\""))
+    }
+
+    @Test
+    fun promptBlock_labeledInteractiveBeatsBlankClickables() {
+        // 高德详情页形态：几十个无文字 click 容器排在前面，有文字的按钮在后面
+        val blanks = (0 until 100).map { blankClick(it, 0, it * 20, 1080, it * 20 + 19) }
+        val labeled = n(100, 0, 2100, 1080, 2200, text = "导航", click = true)
+        val block = NodeGrounding.promptBlock(blanks + labeled, W, H)
+        assertTrue(block, block.contains("text=\"导航\""))
+    }
+
+    @Test
+    fun promptBlock_reservesRoomForEveryScreenBand() {
+        // 顶部 150 个有文字节点占满，底部 5 个有文字节点排最后——每个都要在
+        val top = (0 until 150).map { n(it, 0, it * 4, 1080, it * 4 + 3, text = "t$it") }
+        val bottom = (150 until 155).map { n(it, 0, 2000 + (it - 150) * 60, 1080, 2000 + (it - 150) * 60 + 50, text = "b$it", click = true) }
+        val block = NodeGrounding.promptBlock(top + bottom, W, H)
+        for (i in 150 until 155) assertTrue("底部 #$i 被截掉了:\n$block", block.contains("#$i ("))
+    }
+
+    @Test
+    fun promptBlock_collapsesBlankClickablesSharingTheSameCenter() {
+        // 同一位置叠 8 层无文字的 click 容器（高德 #5–#14 那种），列表里只留一条
+        val stack = (0 until 8).map { blankClick(it, 0, 100, 1080, 200) }
+        val block = NodeGrounding.promptBlock(stack, W, H)
+        assertEquals(block, 1, block.split("\n").size)
+    }
+
+    @Test
+    fun promptBlock_editableIsAlwaysListedEvenWhenTreeIsFull() {
+        val many = (0 until 200).map { n(it, 0, it * 5, 1080, it * 5 + 4, text = "row$it") }
+        val edit = NodeRecord(200, 0, 2200, 1080, 2300, "", "输入", "", "android.widget.EditText", true, false, editable = true)
+        val block = NodeGrounding.promptBlock(many + edit, W, H)
+        assertTrue(block, block.contains("#200 (") && block.contains(" edit "))
+    }
+
+    @Test
+    fun promptBlock_listsInReadingOrderTopToBottom() {
+        // 树顺序是"底部先、顶部后"，输出仍按屏幕从上到下
+        val nodes = listOf(
+            n(0, 0, 2000, 1080, 2100, text = "底", click = true),
+            n(1, 0, 100, 1080, 200, text = "顶", click = true),
+            n(2, 0, 1000, 1080, 1100, text = "中", click = true),
+        )
+        val lines = NodeGrounding.promptBlock(nodes, W, H).split("\n")
+        assertTrue(lines[0].startsWith("#1 ") && lines[1].startsWith("#2 ") && lines[2].startsWith("#0 "))
+    }
+
     // ---- relocate：一步多动作时，批内后续动作要在新 dump 里按身份重新定位（键盘布局中途变化）----
 
     private fun key(id: Int, text: String, l: Int, t: Int) =
