@@ -1,6 +1,7 @@
 package com.androiduse.agent
 
 import com.androiduse.actuation.Action
+import com.androiduse.capability.SystemCall
 
 /**
  * AgentLoop 与设备之间的边界：观察（截图 + 节点树）和执行（注入）。
@@ -31,6 +32,12 @@ interface Environment {
      * 不支持刷新的环境返回 null，调用方退回用步初的树。
      */
     fun refreshNodes(): List<com.androiduse.daemon.DumpCodec.NodeRecord>? = null
+
+    /**
+     * 2a：执行一个系统接口调用（Intent 落虚拟屏 / ContentProvider 读写）。返回的 text 直接作为 tool 消息
+     * 回给模型（查询结果、"已创建事件 id=N"、失败原因）。默认实现：不支持。
+     */
+    fun performSystem(call: SystemCall): SystemResult = SystemResult(false, "此环境不支持系统接口工具")
 }
 
 /** Transcript 的落盘/旁路观察者。默认实现全是空操作，方便测试和 CLI 按需实现。 */
@@ -46,3 +53,6 @@ interface TranscriptSink {
     /** 任务结束（完成或中止）时调用一次。 */
     fun outcome(t: Transcript, finished: Boolean, summary: String) {}
 }
+
+/** 系统接口调用的结果。ok=false 时 text 是给模型看的失败原因。 */
+data class SystemResult(val ok: Boolean, val text: String)

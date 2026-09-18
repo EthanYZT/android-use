@@ -48,6 +48,8 @@ object ActionCommand {
             is Action.OpenApp -> null
             // Type 走守护进程无障碍接口，不产生 shell 命令；Injector 单独处理。
             is Action.Type -> null
+            // 系统接口走 Environment.performSystem（SystemIntents.argv / ContentResolver），不经 shell 字符串。
+            is Action.System -> null
         }
     }
 

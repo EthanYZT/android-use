@@ -40,6 +40,13 @@ sealed class Action {
      */
     data class Type(val text: String, val nodeId: Int?, val submit: Boolean) : Action()
 
+    /**
+     * 2a：系统接口工具（闹钟/日历/联系人/短信/拨号/导航/设置页）。参数已由
+     * [com.androiduse.capability.SystemCallParser] 校验；执行走 Environment.performSystem，
+     * 不经 Injector / ActionCommand（toShell 对它返回 null）。
+     */
+    data class System(val call: com.androiduse.capability.SystemCall) : Action()
+
     /** 任务完成。summary 是模型对结果的自述，用于日志与验收。 */
     data class Finish(val summary: String) : Action()
 }

@@ -114,4 +114,25 @@ class ToolCallResolverTest {
         val r = ToolCallResolver.resolve(ToolCall("c", "type", """{"text":"x","id":99}"""), nodes, w, h)
         assertTrue(err(r), err(r).contains("99"))
     }
+
+    @Test
+    fun systemToolResolvesToActionSystem() {
+        val r = ToolCallResolver.resolve(ToolCall("c", "dial", """{"number":"10086"}"""), nodes, w, h)
+        assertEquals(Action.System(com.androiduse.capability.SystemCall.Dial("10086")), ok(r))
+    }
+
+    @Test
+    fun systemToolValidationErrorIsFedBack() {
+        val r = ToolCallResolver.resolve(ToolCall("c", "calendar_create", """{"title":"x","start":"明天"}"""), nodes, w, h)
+        assertTrue(err(r), err(r).contains("YYYY-MM-DD HH:mm"))
+    }
+
+    @Test
+    fun calendarQueryDefaultsUseInjectedClock() {
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val now = com.androiduse.capability.TimeText.parseDateTime("2026-09-18 16:52", zone)!!
+        val r = ToolCallResolver.resolve(ToolCall("c", "calendar_query", "{}"), nodes, w, h, nowMs = now, zone = zone)
+        val call = (ok(r) as Action.System).call as com.androiduse.capability.SystemCall.CalendarQuery
+        assertEquals(com.androiduse.capability.TimeText.parseDateTime("2026-09-18 00:00", zone)!!, call.fromMs)
+    }
 }

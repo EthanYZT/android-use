@@ -27,6 +27,9 @@ object ToolCallResolver {
         apps: List<AppEntry> = emptyList(),
         /** 非 null 时（一步多动作的批内后续动作）：tap-by-id 在这棵新树里按身份重新定位。 */
         freshNodes: List<NodeRecord>? = null,
+        /** 2a：calendar_query 默认时间范围用；测试注入固定时钟。 */
+        nowMs: Long = System.currentTimeMillis(),
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
     ): Resolution {
         val a = call.argumentsJson
         return when (call.name) {
@@ -73,6 +76,11 @@ object ToolCallResolver {
             }
             "wait" -> Resolution.Ok(Action.Wait(Action.Wait.clamp(ResponseParser.intField(a, "ms") ?: 500)))
             "finish" -> Resolution.Ok(Action.Finish(ResponseParser.field(a, "summary") ?: ""))
+            in com.androiduse.capability.SystemCallParser.TOOL_NAMES ->
+                when (val r = com.androiduse.capability.SystemCallParser.parse(call.name, a, nowMs, zone)!!) {
+                    is com.androiduse.capability.SystemCallParser.Result.Ok -> Resolution.Ok(Action.System(r.call))
+                    is com.androiduse.capability.SystemCallParser.Result.Err -> Resolution.Err(r.message)
+                }
             else -> Resolution.Err("没有名为 ${call.name.take(30)} 的工具")
         }
     }

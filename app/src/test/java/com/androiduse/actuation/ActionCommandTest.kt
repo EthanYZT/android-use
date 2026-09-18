@@ -71,4 +71,10 @@ class ActionCommandTest {
         // 文字输入走守护进程的无障碍 ACTION_SET_TEXT（支持中文、不依赖输入法），不是 input text。
         assertNull(ActionCommand.toShell(Action.Type("豆包", null, false), screen))
     }
+
+    @Test
+    fun systemActionProducesNoShellCommand() {
+        val screen = com.androiduse.display.VirtualScreen(7, 1080, 2376)
+        assertNull(ActionCommand.toShell(Action.System(com.androiduse.capability.SystemCall.Dial("10086")), screen))
+    }
 }
