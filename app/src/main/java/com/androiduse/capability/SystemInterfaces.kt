@@ -89,7 +89,7 @@ class SystemInterfaces(
             Log.w(TAG, "display leak check unavailable (dumpsys failed): call=$call")
             return SystemResult(true, SystemIntents.successText(call, mapPackage, smsComponent) + "（未能核对页面是否落在虚拟屏）")
         }
-        val leaked = DisplayTasks.leakedToPhysical(before, after, launchedPkg)
+        val leaked = DisplayTasks.leakedToPhysical(before, after, launchedPkg, context.packageName)
         if (leaked.isNotEmpty()) return rollback(leaked, call)
         return SystemResult(true, SystemIntents.successText(call, mapPackage, smsComponent))
     }

@@ -57,11 +57,17 @@ object DisplayTasks {
      *   撤回得多一点，也不要因为不知道包名就完全不核对。
      * - display 0 置顶任务发生了变化，且新置顶任务的包名匹配（或 [pkg] 未知）：这种任务本来
      *   就在 before 里、不算"新"，但从后台被带到最前本身就是"抢占物理屏前台"，同样要撤回。
+     *
+     * [ownPkg] 是本 App 自己的包名，永远从候选里排除——不管 [pkg]（这次启动的目标包）是否已知。
+     * 本 App 自己就跑在物理屏上（阶段 0/2a 设计如此），它的任务在 display 0 置顶、或者作为
+     * "新任务"出现，都是正常前台切换，从来不是"泄漏"；[pkg] 为 null 时尤其容易误判——不加
+     * 这层排除，一次 navigate 因为没装地图而 [pkg] 未知，随后本 App 自己的任务恰好被带回置顶，
+     * 就会被当成泄漏，进而尝试 `am stack remove` 自己的任务。
      */
-    fun leakedToPhysical(before: Map<Int, List<Task>>, after: Map<Int, List<Task>>, pkg: String?): List<Int> {
+    fun leakedToPhysical(before: Map<Int, List<Task>>, after: Map<Int, List<Task>>, pkg: String?, ownPkg: String): List<Int> {
         val beforeIds = (before[0] ?: emptyList()).map { it.id }.toSet()
         val afterTasks = after[0] ?: emptyList()
-        val matches = { t: Task -> pkg == null || t.pkg == pkg }
+        val matches = { t: Task -> t.pkg != ownPkg && (pkg == null || t.pkg == pkg) }
 
         val result = LinkedHashSet<Int>()
         afterTasks.filter { it.id !in beforeIds }.filter(matches).forEach { result += it.id }
