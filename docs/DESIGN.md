@@ -520,6 +520,7 @@ fn preflight(action, expected_context) -> Decision:
 ### 阶段 2：能力路由（系统接口 + MCP）
 - **目标**：优先走协议。接入闹钟/日历/短信/设置/地图/电话等系统接口；接入 1–2 个 MCP 服务。
 - **验收**：日历改期、发短信、设闹钟、导航等任务走系统接口完成，不经过 GUI。
+- **2a 系统接口（2026-09-18，分支 `stage2a-system-interfaces`，未合并）**：九个工具（闹钟/日历查建改/联系人/短信编辑/拨号/导航/设置页）软路由接入，实现与单测完成；真机验收 3/5，短信编辑页经跳板落到物理屏（红线）待修，AgentCli 不能用 Provider 类工具。见 spec `superpowers/specs/2026-09-18-2a-system-interfaces-design.md` §7。2b MCP 待做。
 
 ### 阶段 3：GUI 兜底 + 安全网关
 - **目标**：GUI 覆盖任意 App；安全网关全量生效。

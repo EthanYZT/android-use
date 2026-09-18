@@ -104,3 +104,31 @@ notification, accessibility, nfc, storage, security, input_method, about, networ
 - `geo:` → 高德 / 百度 / 滴滴 三家都接，裸 Intent 弹 `ResolverActivity`。
 - 日历：`_id=1 local account (LOCAL)`，其余是 heytap 生日/纪念日/倒数日；当前无事件、无联系人。
 - 15 个 `android.settings.*` 全部解析到具体 Activity（WLAN/蓝牙/NFC 在 `com.oplus.wirelesssettings`）。
+
+## 7. 验收结果（2026-09-18 晚，部分通过，实现已全部落地在 `stage2a-system-interfaces` 分支）
+
+实现：Task 1–7 全部完成并逐任务审查通过（单测 249 绿，`installDebug` 成功）。跑法：AgentCli（root app_process）与 App 进程
+（`am start -n com.androiduse/.MainActivity --es task '…'`）各跑了一部分；物理机同时接了一个模拟器，adb 必须 `-s 3B658700ZQ400000`。
+
+| # | 任务 | 完成 | 步 | 工具序列 | tap/swipe | 备注 |
+|---|---|---|---|---|---|---|
+| 1 | 设 7:30 闹钟 | ✅ | 2 | set_alarm → finish | 0 | ColorOS `HandleApiActivity` 认 `SKIP_UI`：不弹页面，虚拟屏只出现"距离下次响铃还有 14 小时"提示 |
+| 2 | 明天下午的会改到下周二 15:00 | ✅（App 进程） | 3 | calendar_query → calendar_update → finish | 0 | Provider 里 dtstart 确认已变为 09-22 15:00；首次调用走 root `pm grant` 自授成功 |
+| 2' | 同上（AgentCli） | ❌ | 10 | calendar_query 报错 → GUI 兜底耗尽步数 | 8 | **AgentCli 不能用 Provider 类工具**：systemMain 系统 Context 的 ContentResolver 抛 `SecurityException: Unable to find app for caller IApplicationThread`（裸 app_process 没有注册的 app 进程）。Provider 工具只能在 App 进程用 |
+| 3 | 给张伟发短信说我晚点到 | ❌ **红线** | 10 | contacts_lookup 报错(同上，CLI) → GUI 查到号码 → sms_compose | 6 | `sms_compose` 的 `am start` 成功，但短信编辑页**落到了物理屏**（`LaunchConversationActivity` 是跳板，它以 `NEW_TASK|NEW_DOCUMENT|CLEAR_TASK` 二次启动 `ConversationActivity`，新任务落 display 0）。虚拟屏上模型看不到编辑页，反复点联系人页的"短信"按钮 |
+| 4 | 导航去天安门 | ✅ | 10 | navigate → GUI 接手 | 8 | 高德在虚拟屏打开；首次启动隐私页 + 登录弹窗 + "网络不佳"各吃步数，最终进入驾车导航界面。跳板 `SchemeHandleActivity` **没有**泄漏到物理屏 |
+| 5 | 打开 WLAN 设置 | ✅ | 2 | tap(WLAN) → finish | 1 | 虚拟屏起手就是设置首页，模型直接点了 WLAN 而没用 open_settings（软路由"能用就用"不够强）；息屏状态的另一次跑用了 open_settings，`am start` 成功 |
+
+**结论：未通过。** 1/2/4 走协议成立；3 触碰"Agent 不抢占物理前台"红线，必须修；5 可接受。
+
+**发现与待办（下一会话）**：
+1. **短信跳板泄漏（必修）**：手动验证 `am start --display <虚拟屏> -f 0x18000000 -a SENDTO -d smsto:… --es sms_body … -n com.android.mms/.ui.conversation.ConversationActivity`
+   直接起目标 Activity 时任务留在虚拟屏（销屏后随之销毁，物理屏顶层不变）。方案：`sms_compose` 解析 SENDTO 处理者后，对已知跳板
+   （本机 `LaunchConversationActivity`）改起真正的会话 Activity；通用做法可在 `am start` 后用 `dumpsys activity` 核对新任务所在 display，
+   落到 0 就报失败而不是谎报成功（"停在中间页由 GUI 接手"的前提是页面真的在虚拟屏上）。`dial` 同样手动起过一次（`DialtactsActivityAlias`），
+   销屏后消失，判断在虚拟屏，但未经模型 E2E。
+2. **AgentCli 与 Provider**：`SystemInterfaces` 对 CLI 应给出明确文案（"CLI 不支持日历/联系人工具，请用 App"），或 CLI 改走 `IActivityManager.getContentProviderExternal`（shell `content` 命令的路径）。
+3. **测试前置**：物理机息屏（Dozing）时虚拟屏显示锁屏时钟，模型会瞎点；跑 E2E 前 `input keyevent KEYCODE_WAKEUP` + `keyevent 82`。
+4. 造的数据仍在机上：日历事件 `_id=1 周会`（已改到 09-22 15:00）、`_id=2 牙医`，联系人 张伟 13800000000（raw_contact 1）；时钟里多了一个 07:30 闹钟。
+5. 物理屏一度被短信编辑页顶到前台，已 `am force-stop com.android.mms` 清掉；跑完后物理屏顶层是本 App（App 进程跑 ② 留下的）。
+6. SDD 收尾未做：整分支终审（final review）与 `finishing-a-development-branch` 留到下一会话；账本在 `.superpowers/sdd/2026-09-18-2a-system-interfaces/progress.md`。
