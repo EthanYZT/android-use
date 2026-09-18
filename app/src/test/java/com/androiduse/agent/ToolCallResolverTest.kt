@@ -66,6 +66,12 @@ class ToolCallResolverTest {
     }
 
     @Test
+    fun handoffResolvesToActionWithReason() {
+        assertEquals(Action.Handoff("停在结算页，需要你付款"), ok(ToolCallResolver.resolve(ToolCall("c", "handoff", """{"reason":"停在结算页，需要你付款"}"""), nodes, w, h)))
+        assertEquals(Action.Handoff(""), ok(ToolCallResolver.resolve(ToolCall("c", "handoff", "{}"), nodes, w, h)))
+    }
+
+    @Test
     fun homeAndUnknownToolsAreErrors() {
         assertTrue(ToolCallResolver.resolve(ToolCall("c", "home", "{}"), nodes, w, h) is ToolCallResolver.Resolution.Err)
         assertTrue(ToolCallResolver.resolve(ToolCall("c", "teleport", "{}"), nodes, w, h) is ToolCallResolver.Resolution.Err)

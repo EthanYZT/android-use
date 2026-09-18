@@ -76,6 +76,7 @@ object ToolCallResolver {
             }
             "wait" -> Resolution.Ok(Action.Wait(Action.Wait.clamp(ResponseParser.intField(a, "ms") ?: 500)))
             "finish" -> Resolution.Ok(Action.Finish(ResponseParser.field(a, "summary") ?: ""))
+            "handoff" -> Resolution.Ok(Action.Handoff(ResponseParser.field(a, "reason") ?: ""))
             in com.androiduse.capability.SystemCallParser.TOOL_NAMES -> {
                 // TOOL_NAMES 成员理应总能让 parse 认出名字返回非 null（哪怕参数校验失败也是个
                 // Err），但不能靠 !! 赌这个不变式——名字一旦不一致，要把它变成能反馈给模型的

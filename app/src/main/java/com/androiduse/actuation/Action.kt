@@ -49,4 +49,10 @@ sealed class Action {
 
     /** 任务完成。summary 是模型对结果的自述，用于日志与验收。 */
     data class Finish(val summary: String) : Action()
+
+    /**
+     * 交接：模型做到需要本人操作的一步（付款/提交订单/结算确认、滑块/选图类人机验证）停下，
+     * reason 说明停在哪、用户接着做什么。与 Finish 一样结束循环；不经 Injector（toShell 返回 null）。
+     */
+    data class Handoff(val reason: String) : Action()
 }

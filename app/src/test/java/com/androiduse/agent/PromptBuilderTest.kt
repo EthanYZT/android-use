@@ -281,4 +281,15 @@ class PromptBuilderTest {
         assertTrue(tools.contains("YYYY-MM-DD HH:mm"))
         assertTrue(tools.contains(com.androiduse.capability.SettingsPage.keys()))
     }
+
+    @Test
+    fun declaresHandoffToolAndRule() {
+        val tools = PromptBuilder.toolsJson()
+        assertTrue(tools, tools.contains("\"name\":\"handoff\""))
+        assertTrue(tools, tools.contains("\"reason\""))
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains(PromptBuilder.HANDOFF_RULE))
+        assertTrue(p, p.contains("不要拖滑块"))
+        assertTrue(p, p.contains("短信验证码不算"))
+    }
 }

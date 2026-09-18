@@ -77,4 +77,9 @@ class ActionCommandTest {
         val screen = com.androiduse.display.VirtualScreen(7, 1080, 2376)
         assertNull(ActionCommand.toShell(Action.System(com.androiduse.capability.SystemCall.Dial("10086")), screen))
     }
+
+    @Test
+    fun handoffHasNoShellCommand() {
+        assertNull(ActionCommand.toShell(Action.Handoff("x"), VirtualScreen(7, 1080, 2376)))
+    }
 }
