@@ -178,6 +178,18 @@ class AgentLoopTest {
         assertEquals(1, o.transcript.steps.size)
     }
 
+
+    @Test
+    fun unlimitedStepsRunsPastTheOldCapUntilFinish() {
+        // App 不限步数：20 步都在点不同元素（不触发卡住判定），第 21 步 finish，循环不能在 15 步中止。
+        val nodes = (0 until 30).map { NodeRecord(it, 0, it * 60, 1000, it * 60 + 50, "项$it", "", "", "", true, false) }
+        val replies = (0 until 20).map { toolReply("第 $it 步", "tap" to """{"id":$it}""") } + toolReply("完成", "finish" to """{"summary":"done"}""")
+        val (o, env, _) = harness(*replies.toTypedArray(), env = FakeEnv({ nodes }), maxSteps = AgentLoop.UNLIMITED_STEPS)
+        assertTrue(o.finished)
+        assertEquals(21, o.transcript.steps.size)
+        assertEquals(20, env.performed.size)
+    }
+
     @Test
     fun maxStepsAbortMentionsLastNote() {
         val (o, _, _) = harness(

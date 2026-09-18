@@ -35,6 +35,13 @@ class AgentLoop(
         /** 连续这么多步"屏幕节点列表相同且动作相同"判定卡住。这是兜底，不是主要防线。 */
         const val STUCK_REPEATS = 3
 
+        /**
+         * 不限步数（App 用）：任务跑到 finish/handoff 为止。剩下的刹车只有 MAX_CONSECUTIVE_FAILURES、
+         * STUCK_REPEATS 和用户手动停止——模型换着页面绕圈时不会自动停，这是用户明确要的（2026-09-18）。
+         * CLI 跑批仍按 argv 传上限。
+         */
+        const val UNLIMITED_STEPS = Int.MAX_VALUE
+
         /** 一步内最多顺序执行多少个 tool call（键盘/键区连按够用，防模型一口气发几十个）。 */
         const val MAX_CALLS_PER_STEP = 8
 

@@ -136,7 +136,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
                 val outcome = AgentLoop(client, AndroidEnvironment(screen, applicationContext, MlKitTextReader), BuildConfig.ARK_MODEL_ID, sink)
-                    .run(task) { line ->
+                    .run(task, maxSteps = AgentLoop.UNLIMITED_STEPS) { line ->
                         Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
                         runOnUiThread { binding.toolbar.subtitle = line.take(90) }
                     }
