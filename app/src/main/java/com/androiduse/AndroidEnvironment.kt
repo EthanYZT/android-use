@@ -2,12 +2,15 @@ package com.androiduse
 
 import com.androiduse.actuation.Action
 import com.androiduse.actuation.Injector
-import android.content.pm.PackageManager
+import android.content.Context
 import android.util.Log
 import com.androiduse.agent.AppEntry
 import com.androiduse.agent.Environment
 import com.androiduse.agent.NodeGrounding
 import com.androiduse.agent.Observation
+import com.androiduse.agent.SystemResult
+import com.androiduse.capability.SystemCall
+import com.androiduse.capability.SystemInterfaces
 import com.androiduse.daemon.DumpCodec
 import com.androiduse.display.VirtualScreen
 import com.androiduse.agent.OcrMerge
@@ -21,13 +24,18 @@ import com.androiduse.root.DaemonClient
  */
 class AndroidEnvironment(
     private val screen: VirtualScreen,
-    /** 查 open_app 白名单用；null 表示没有可用的 PackageManager（列表为空，open_app 不可用）。 */
-    private val pm: PackageManager?,
+    /** 查 open_app 白名单、系统接口工具用；null 表示没有可用的 Context（列表为空，open_app/系统接口不可用）。 */
+    private val context: Context?,
     /** 1d：端侧 OCR 补洞；null 表示不做 OCR（AgentCli），列表为纯节点树。 */
     private val textReader: TextReader? = null,
 ) : Environment {
 
     private companion object { const val TAG = "AndroidEnvironment" }
+
+    private val system: SystemInterfaces? = context?.let { SystemInterfaces(it, screen) }
+
+    override fun performSystem(call: SystemCall): SystemResult =
+        system?.perform(call) ?: SystemResult(false, "没有 Context，系统接口工具不可用")
 
     override val screenW: Int get() = screen.widthPx
     override val screenH: Int get() = screen.heightPx
@@ -66,7 +74,7 @@ class AndroidEnvironment(
 
     override fun lastError(): String? = Injector.lastTypeError
 
-    override fun installedApps(): List<AppEntry> = pm?.let { LauncherApps.query(it) } ?: emptyList()
+    override fun installedApps(): List<AppEntry> = context?.let { LauncherApps.query(it.packageManager) } ?: emptyList()
 
     override fun refreshNodes(): List<DumpCodec.NodeRecord>? =
         (DaemonClient.dump(screen.logicalDisplayId) as? DumpCodec.DumpResult.Ok)?.nodes

@@ -8,7 +8,6 @@ import com.androiduse.display.ScreenSessionCore
 import com.androiduse.log.TranscriptStore
 import com.androiduse.root.DaemonClient
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Looper
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -29,8 +28,8 @@ object AgentCli {
         val task = args.drop(2).joinToString(" ")
         // ActivityThread 构造需要当前线程有 Looper（与 Daemon 的要点 1 同源）。
         if (Looper.myLooper() == null) Looper.prepareMainLooper()
-        val pm = systemPackageManager()
-        println("packageManager=${if (pm == null) "不可用(open_app 关闭)" else "ok"}")
+        val ctx = systemContext()
+        println("systemContext=${if (ctx == null) "不可用(open_app/系统接口关闭)" else "ok"}")
 
         DaemonClient.apkPath = apkPath
 
@@ -44,7 +43,7 @@ object AgentCli {
         val store = TranscriptStore(File("/data/local/tmp/androiduse_transcripts"))
         try {
             val outcome = runBlocking {
-                AgentLoop(client, AndroidEnvironment(screen, pm), BuildConfig.ARK_MODEL_ID, store)
+                AgentLoop(client, AndroidEnvironment(screen, ctx), BuildConfig.ARK_MODEL_ID, store)
                     .run(task, maxSteps = maxSteps) { println(it) }
             }
             println("RESULT: finished=${outcome.finished} ${outcome.summary}")
@@ -57,16 +56,16 @@ object AgentCli {
 
     /**
      * 裸 app_process 里没有应用 Context，用 `ActivityThread.systemMain().getSystemContext()` 拿
-     * 系统 Context 的 PackageManager 来查桌面 App 列表。hidden API，与守护进程的
-     * UiAutomationFactory 同一类做法；失败只关掉 open_app，不影响其余循环。
+     * 系统 Context（供 open_app 的 PackageManager、2a 系统接口工具的 SystemInterfaces 用）。
+     * hidden API，与守护进程的 UiAutomationFactory 同一类做法；失败只关掉 open_app/系统接口，
+     * 不影响其余循环。
      */
-    private fun systemPackageManager(): PackageManager? = try {
+    private fun systemContext(): Context? = try {
         val at = Class.forName("android.app.ActivityThread")
         val thread = at.getMethod("systemMain").invoke(null)
-        val ctx = at.getMethod("getSystemContext").invoke(thread) as Context
-        ctx.packageManager
+        at.getMethod("getSystemContext").invoke(thread) as Context
     } catch (e: Throwable) {
-        println("systemMain 取 PackageManager 失败: $e")
+        println("systemMain 取 Context 失败: $e")
         null
     }
 }
