@@ -12,7 +12,7 @@
 | **1a** | `RootShell` argv 接口；不可信文本分隔/转义约定 | 本轮实现 |
 | **1b** | 虚拟屏节点树获取（root 守护进程） | 本轮实现（先 spike） |
 | **1c** | 节点 grounding：提示词改「截图+节点列表」，按元素编号选，坐标从 bounds 出；截图坐标兜底 | 后续 |
-| **1d** | OCR 兜底：ML Kit 中文识别打包，裁区 OCR | 后续 |
+| **1d** | OCR 兜底：ML Kit 中文打包，每步全帧 OCR 自动补洞（非裁区） | ✅ 2026-09-18，见 `2026-09-18-1d-ocr-fallback-design.md` |
 | **1e** | 真 headless 屏（守护进程持 TRUSTED 虚拟屏）；解决销屏重挂、空屏镜像；Home 泄漏仍在 | ✅ 2026-09-18，见 `2026-09-18-1e-headless-display-design.md` |
 
 **关键真机事实（2026-09-17 核实）**：本机 `uiautomator dump` 只有 `[--verbose][--compressed][file]`，**无 display 参数，只能 dump 物理屏 display 0**。App 跑在虚拟屏，故节点树不能靠 shell，必须自持 `UiAutomation`。这条决定了 1b 走守护进程。
