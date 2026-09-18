@@ -1,6 +1,7 @@
 package com.androiduse.agent
 
 import com.androiduse.actuation.Action
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -113,26 +114,36 @@ class AgentLoop(
                 executedCount++
                 // 批内第二个动作起，tap-by-id 先重新 dump 一次节点树按身份定位（前一个动作可能已让界面重排）。
                 val fresh = if (ci > 0 && call.name == "tap" && ResponseParser.intField(call.argumentsJson, "id") != null) env.refreshNodes() else null
-                val exec = when (val res = ToolCallResolver.resolve(call, obs.nodes, env.screenW, env.screenH, t.apps, fresh)) {
-                    is ToolCallResolver.Resolution.Err -> Execution(null, false, res.message, System.currentTimeMillis() - c0)
-                    is ToolCallResolver.Resolution.Ok -> {
-                        val action = res.action
-                        when (action) {
-                            is Action.Finish -> {
-                                finish = action
-                                Execution(action, true, "finish", System.currentTimeMillis() - c0)
-                            }
-                            // 2a：系统接口不经注入；返回的 text（查询结果/成功文案/失败原因）就是 tool 消息。
-                            is Action.System -> {
-                                val r = env.performSystem(action.call)
-                                Execution(action, r.ok, r.text, System.currentTimeMillis() - c0)
-                            }
-                            else -> {
-                                val ok = env.perform(action)
-                                Execution(action, ok, if (ok) "ok" else (env.lastError() ?: "注入失败"), System.currentTimeMillis() - c0)
+                // resolve/perform/performSystem 都是外部输入或设备调用，任何没预料到的异常
+                // （比如 Environment 实现里的 bug）不能让整个任务中止：兜成一次失败的 Execution，
+                // 文本回给模型，循环继续。CancellationException 例外——那是外层 cancel() 的信号，
+                // 必须往上抛，不能被这里吞掉。
+                val exec = try {
+                    when (val res = ToolCallResolver.resolve(call, obs.nodes, env.screenW, env.screenH, t.apps, fresh)) {
+                        is ToolCallResolver.Resolution.Err -> Execution(null, false, res.message, System.currentTimeMillis() - c0)
+                        is ToolCallResolver.Resolution.Ok -> {
+                            val action = res.action
+                            when (action) {
+                                is Action.Finish -> {
+                                    finish = action
+                                    Execution(action, true, "finish", System.currentTimeMillis() - c0)
+                                }
+                                // 2a：系统接口不经注入；返回的 text（查询结果/成功文案/失败原因）就是 tool 消息。
+                                is Action.System -> {
+                                    val r = env.performSystem(action.call)
+                                    Execution(action, r.ok, r.text, System.currentTimeMillis() - c0)
+                                }
+                                else -> {
+                                    val ok = env.perform(action)
+                                    Execution(action, ok, if (ok) "ok" else (env.lastError() ?: "注入失败"), System.currentTimeMillis() - c0)
+                                }
                             }
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Execution(null, false, "内部错误: ${e.javaClass.name}: ${e.message}", System.currentTimeMillis() - c0)
                 }
                 step.executions += exec
                 if (exec.ok) lastAction = exec.action

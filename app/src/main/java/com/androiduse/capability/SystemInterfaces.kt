@@ -74,24 +74,51 @@ class SystemInterfaces(
     private fun startIntent(call: SystemCall, mapPackage: String?): SystemResult {
         val smsComponent = (call as? SystemCall.SmsCompose)?.let { SystemIntents.smsComponentFor(resolveSmsHandler(it.number)) }
         val argv = SystemIntents.argv(call, screen.logicalDisplayId, mapPackage, smsComponent) ?: return SystemResult(false, "不是 Intent 类调用")
+        val launchedPkg = launchedPackage(call, mapPackage)
         val before = DisplayTasks.parse(dumpActivities())
         val r = RootShell.execArgv(argv)
-        if (!r.ok) return SystemResult(false, "启动失败: ${(r.stderr.ifBlank { r.stdout }).take(120)}")
+        // r.ok 只看 exitCode；有些 ROM 上 Intent 解析失败（比如 -p 指定的包没装对应 Activity）
+        // exitCode 仍是 0，错误只体现在 stdout 里一行 "Error: ..."，同样算启动失败。
+        if (!r.ok || r.stdout.contains("Error:")) return SystemResult(false, "启动失败: ${(r.stderr.ifBlank { r.stdout }).take(120)}")
         Thread.sleep(Injector.jitter(INTENT_SETTLE_MS))
         // 落屏核对：对所有 Intent 类工具生效。dumpsys 拿不到输出（本次或起 Intent 之前那次）时对应
-        // map 里没有 display 0 这个 key——核对本身跑不动，不因此拦截启动，但要 Log.w 一条留痕，
-        // 否则「悄悄没查」和「查了确认没泄漏」在日志里没法区分。
+        // map 里没有 display 0 这个 key——核对本身跑不动，不因此拦截启动（ok=true），但文案要如实
+        // 说明"没核对成"，日志留痕，否则「悄悄没查」和「查了确认没泄漏」没法区分。
         val after = DisplayTasks.parse(dumpActivities())
         if (0 !in before || 0 !in after) {
             Log.w(TAG, "display leak check unavailable (dumpsys failed): call=$call")
+            return SystemResult(true, SystemIntents.successText(call, mapPackage, smsComponent) + "（未能核对页面是否落在虚拟屏）")
         }
-        val leaked = DisplayTasks.leakedToPhysical(before, after)
-        if (leaked.isNotEmpty()) {
-            leaked.forEach { RootShell.execArgv(listOf("am", "stack", "remove", it.toString())) } // 尽力撤回，不看结果
-            Log.w(TAG, "intent leaked to display 0: tasks=$leaked call=$call")
-            return SystemResult(false, "页面落到了物理屏而不是虚拟屏，已撤回；请改用界面操作完成")
-        }
+        val leaked = DisplayTasks.leakedToPhysical(before, after, launchedPkg)
+        if (leaked.isNotEmpty()) return rollback(leaked, call)
         return SystemResult(true, SystemIntents.successText(call, mapPackage, smsComponent))
+    }
+
+    /**
+     * 泄漏撤回：对每个泄漏任务发 `am stack remove`，再重新 dump 一次核对是否真的撤下去了——
+     * `ShellResult.ok` 只说明命令本身没报错，不代表任务真的没了（某些 ROM 的 `am stack remove`
+     * 对已经 resumed 的任务是空操作）。核对方式是直接看这些任务 id 是否还在 display 0 的列表里
+     * ——不能用 [DisplayTasks.leakedToPhysical] 重新判定"是不是泄漏"：那个函数只认"新出现"或
+     * "刚好在置顶"，如果任务还在物理屏但既不新（早就在 before 里）也不再置顶，会被误判成"没事了"。
+     * dumpsys 本身再次失败（拿不到 display 0）时保守按"还在"处理，不能因为查不到就报成功。
+     * 两种结局都要 Log 留痕，且都是 ok=false：泄漏本身已经发生过（哪怕瞬间），不能因为事后
+     * 撤回成功就告诉模型"什么都没发生"。
+     */
+    private fun rollback(leaked: List<Int>, call: SystemCall): SystemResult {
+        val removeFailed = leaked.filterNot { RootShell.execArgv(listOf("am", "stack", "remove", it.toString())).ok }
+        if (removeFailed.isNotEmpty()) {
+            Log.w(TAG, "am stack remove reported failure: tasks=$removeFailed call=$call")
+        }
+        val recheck = DisplayTasks.parse(dumpActivities())
+        val onDisplay0Now = (recheck[0] ?: emptyList()).map { it.id }.toSet()
+        val stillPresent = if (0 in recheck) leaked.filter { it in onDisplay0Now } else leaked
+        return if (stillPresent.isEmpty()) {
+            Log.w(TAG, "intent leaked to display 0, rolled back: tasks=$leaked call=$call")
+            SystemResult(false, "页面落到了物理屏而不是虚拟屏，已撤回；请改用界面操作完成")
+        } else {
+            Log.w(TAG, "intent leaked to display 0, rollback failed: tasks=$leaked stillPresent=$stillPresent call=$call")
+            SystemResult(false, "页面落到了物理屏而不是虚拟屏，撤回失败（任务 #${stillPresent.joinToString(", ")} 仍在物理屏）；请改用界面操作完成")
+        }
     }
 
     private fun dumpActivities(): String = RootShell.execArgv(listOf("dumpsys", "activity", "activities")).stdout
@@ -100,6 +127,31 @@ class SystemInterfaces(
     private fun resolveSmsHandler(number: String): String? =
         context.packageManager.resolveActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).setPackage(SystemIntents.SMS_PACKAGE), 0)
             ?.activityInfo?.let { ComponentName(it.packageName, it.name).flattenToString() }
+
+    /**
+     * 这次 Intent 调用会落到哪个包，用来把泄漏核对限定在"我们自己启动的东西"上：sms_compose
+     * 固定打给短信 App；navigate 就是调用方选定的地图包（选不到时 null）；其余三种
+     * （闹钟/拨号/设置页）用与实际启动相同的 action/data 交给系统解析，解析不到时 null——
+     * 这时 [DisplayTasks.leakedToPhysical] 按"包名未知"处理，任何新任务都算数。
+     */
+    private fun launchedPackage(call: SystemCall, mapPackage: String?): String? = when (call) {
+        is SystemCall.SmsCompose -> SystemIntents.SMS_PACKAGE
+        is SystemCall.Navigate -> mapPackage
+        is SystemCall.SetAlarm, is SystemCall.Dial, is SystemCall.OpenSettings -> resolveLaunchPackage(call)
+        else -> null
+    }
+
+    private fun resolveLaunchPackage(call: SystemCall): String? {
+        // action 字符串必须和 SystemIntents.argv 里实际用来起 Intent 的那个一致（Intent 类没有
+        // ACTION_SET_ALARM 常量，那是 android.provider.AlarmClock 里的，这里直接用字面量）。
+        val intent = when (call) {
+            is SystemCall.SetAlarm -> Intent("android.intent.action.SET_ALARM")
+            is SystemCall.Dial -> Intent(Intent.ACTION_DIAL, Uri.parse("tel:${call.number}"))
+            is SystemCall.OpenSettings -> Intent(call.page.action)
+            else -> return null
+        }
+        return context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
+    }
 
     private inline fun withProviders(block: () -> SystemResult): SystemResult =
         if (!providersAvailable) SystemResult(false, PROVIDERS_UNAVAILABLE_TEXT) else block()

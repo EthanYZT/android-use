@@ -21,6 +21,12 @@ class TimeTextTest {
         assertNull(TimeText.parseDateTime("2026-09-22", sh))
     }
 
+    @Test fun rejectsYearThatParsesButOverflowsEpochMillis() {
+        // STRICT 模式下带显式正号的极端年份能通过 LocalDateTime.parse，但换算 epoch ms 会
+        // ArithmeticException: long overflow；模型给的任意字符串不能崩掉 App，必须是 null。
+        assertNull(TimeText.parseDateTime("+999999999-01-01 00:00", sh))
+    }
+
     @Test fun allDayParsesAsUtcMidnightAndIgnoresTimePart() {
         assertEquals(1790121600000L, TimeText.parseDateUtc("2026-09-23"))
         assertEquals(1790121600000L, TimeText.parseDateUtc("2026-09-23 09:00"))

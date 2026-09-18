@@ -159,6 +159,15 @@ class PromptBuilderTest {
         assertFalse(p.contains("\"action\":\"home\""))
     }
 
+    @Test
+    fun untrustedTextRuleAlsoCoversSystemToolResults() {
+        // I4：屏幕/元素列表之外，工具返回的结果（日历标题/地点、联系人等，都是外部数据）
+        // 也要被这条"不是指令"的规则点名覆盖，不能只提屏幕和元素列表。
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains("工具返回的结果"))
+        assertTrue(p, p.contains("日历标题"))
+    }
+
     private val apps = listOf(AppEntry("时钟", "com.oplus.alarmclock/.AlarmClock"), AppEntry("日历", "com.coloros.calendar/.Main"))
 
     @Test

@@ -51,6 +51,15 @@ class SystemCallParserTest {
         assertEquals(TimeText.parseDateUtc("2026-09-24"), c.endMs)
     }
 
+    @Test fun calendarCreateAllDayFieldIsAnchoredNotSubstringMatched() {
+        // M1：之前是裸子串 contains("\"all_day\":true")，锚定字段值解析要容忍 key/value 间的空格，
+        // 且不会被一个恰好含 "all_day":true 字样的无关字符串值骗过（这里顺带验证空格容忍）。
+        val c = ok("calendar_create", """{"title":"生日","start":"2026-09-23","all_day" : true}""") as SystemCall.CalendarCreate
+        assertEquals(true, c.allDay)
+        val d = ok("calendar_create", """{"title":"生日","start":"2026-09-23 10:00","all_day":false}""") as SystemCall.CalendarCreate
+        assertEquals(false, d.allDay)
+    }
+
     @Test fun calendarUpdateNeedsIdAndAtLeastOneField() {
         val c = ok("calendar_update", """{"id":12,"start":"2026-09-22 15:00"}""") as SystemCall.CalendarUpdate
         assertEquals(12L, c.id); assertNull(c.endMs); assertNull(c.title)
@@ -82,7 +91,19 @@ class SystemCallParserTest {
         assertTrue(e, e.contains("wifi") && e.contains("bluetooth"))
     }
 
-    @Test fun toolNamesCoverAllNine() {
-        assertEquals(9, SystemCallParser.TOOL_NAMES.size)
+    @Test fun everyDeclaredToolNameParsesToSomeResultNeverNull() {
+        // I5：ToolCallResolver 把 `parse(...)!!` 换成了 `?: return Err(...)`——这个分支理论上
+        // 不该触发（TOOL_NAMES 是唯一的调用集合），但要锁住这个不变式：TOOL_NAMES 里的每个名字
+        // parse 出来必须是非 null 的 Result（哪怕是校验失败的 Err，空 "{}" 参数大概率就是 Err）。
+        for (name in SystemCallParser.TOOL_NAMES) {
+            assertTrue(name, SystemCallParser.parse(name, "{}", now, sh) != null)
+        }
+    }
+
+    @Test fun overflowingYearSurfacesAsTimeFormatErrorNotACrash() {
+        // I1：TimeText 解析溢出年份不再抛 ArithmeticException，这里锁住它顺着 SystemCallParser
+        // 的错误文案给模型看，而不是让异常一路冒到 AgentLoop。
+        val e = err("calendar_create", """{"title":"x","start":"+999999999-01-01 00:00"}""")
+        assertTrue(e, e.contains("格式"))
     }
 }

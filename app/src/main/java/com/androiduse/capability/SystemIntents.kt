@@ -71,7 +71,7 @@ object SystemIntents {
     fun successText(call: SystemCall, mapPackage: String?, smsComponent: String? = null): String = when (call) {
         is SystemCall.SetAlarm -> "已请求时钟设置 %02d:%02d 闹钟；要核对可 open_app 时钟".format(call.hour, call.minute)
         is SystemCall.SmsCompose -> if (smsComponent != null)
-            "已打开短信新建页，但本机会话页不预填：请用 type 在界面填入收件人 ${call.number} 和正文，再点发送"
+            "已打开短信新建页，但本机会话页不预填：请用 type 在界面填入收件人 ${call.number} 和正文，确认内容后，按任务要求决定是否发送"
             else "已打开短信编辑页，收件人与正文已填，尚未发送"
         is SystemCall.Dial -> "已打开拨号盘并填入号码，未拨出"
         is SystemCall.Navigate -> if (mapPackage != null) "已在${MapApps.label(mapPackage)}打开 ${call.query}"

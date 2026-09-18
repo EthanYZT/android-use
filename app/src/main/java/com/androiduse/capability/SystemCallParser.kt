@@ -49,7 +49,7 @@ object SystemCallParser {
             "calendar_create" -> {
                 val title = str("title") ?: return err("calendar_create 需要 title")
                 val startRaw = str("start") ?: return err("calendar_create 需要 start，$TIME_HINT")
-                val allDay = a.contains("\"all_day\":true") || a.contains("\"all_day\": true")
+                val allDay = ResponseParser.field(a, "all_day").equals("true", ignoreCase = true)
                 if (allDay) {
                     val s = TimeText.parseDateUtc(startRaw) ?: return err("全天事件的 start 格式 YYYY-MM-DD")
                     return Result.Ok(SystemCall.CalendarCreate(title, s, s + DAY_MS, str("location"), true))

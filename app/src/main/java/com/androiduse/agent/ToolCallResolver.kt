@@ -76,11 +76,17 @@ object ToolCallResolver {
             }
             "wait" -> Resolution.Ok(Action.Wait(Action.Wait.clamp(ResponseParser.intField(a, "ms") ?: 500)))
             "finish" -> Resolution.Ok(Action.Finish(ResponseParser.field(a, "summary") ?: ""))
-            in com.androiduse.capability.SystemCallParser.TOOL_NAMES ->
-                when (val r = com.androiduse.capability.SystemCallParser.parse(call.name, a, nowMs, zone)!!) {
+            in com.androiduse.capability.SystemCallParser.TOOL_NAMES -> {
+                // TOOL_NAMES 成员理应总能让 parse 认出名字返回非 null（哪怕参数校验失败也是个
+                // Err），但不能靠 !! 赌这个不变式——名字一旦不一致，要把它变成能反馈给模型的
+                // Err，而不是让 NPE 冒到 AgentLoop 把整个任务中止掉。
+                val r = com.androiduse.capability.SystemCallParser.parse(call.name, a, nowMs, zone)
+                    ?: return Resolution.Err("没有名为 ${call.name.take(30)} 的工具")
+                when (r) {
                     is com.androiduse.capability.SystemCallParser.Result.Ok -> Resolution.Ok(Action.System(r.call))
                     is com.androiduse.capability.SystemCallParser.Result.Err -> Resolution.Err(r.message)
                 }
+            }
             else -> Resolution.Err("没有名为 ${call.name.take(30)} 的工具")
         }
     }

@@ -354,6 +354,23 @@ class AgentLoopTest {
     }
 
     @Test
+    fun unexpectedExceptionDuringExecuteBecomesFailedExecutionInsteadOfCrashingTheLoop() {
+        // M5：Environment 实现里的意外异常（这里用 performSystem 模拟）不能让整个任务中止——
+        // 兜成一次失败的 Execution，文本回给模型，循环继续走到下一步。
+        val env = FakeEnv({ listOf(node(0, "返回")) }, system = { throw IllegalStateException("boom") })
+        val (o, _, sent) = harness(
+            toolReply("先查日历", "calendar_query" to "{}"),
+            toolReply("换一种方式", "finish" to """{"summary":"done"}"""),
+            env = env,
+        )
+        assertTrue(o.finished)
+        val ex = o.transcript.steps[0].executions[0]
+        assertFalse(ex.ok)
+        assertTrue(ex.result, ex.result.contains("内部错误") && ex.result.contains("IllegalStateException") && ex.result.contains("boom"))
+        assertTrue(sent[1].contains("内部错误"))
+    }
+
+    @Test
     fun systemToolFailureStopsBatchAndFeedsReasonBack() {
         val env = FakeEnv({ listOf(node(0, "返回")) }, system = { SystemResult(false, "缺 READ_CALENDAR 权限") })
         val (o, _, sent) = harness(
