@@ -138,4 +138,24 @@ class NodeGroundingTest {
         val tap = NodeGrounding.relocate(1, original, listOf(far, near), W, H)!!
         assertEquals(NodeGrounding.centerNorm(near, W, H)!!.second, tap.yNorm)
     }
+
+    // ---- ocr 条目（1d）：伪装成 NodeRecord，promptBlock 打 ocr 标记，解析/重定位照常 ----
+
+    private fun ocr(id: Int, text: String, l: Int, t: Int) =
+        NodeRecord(id, l, t, l + 200, t + 40, text, "", "", OcrMerge.OCR_CLASS, false, false)
+
+    @Test
+    fun promptBlock_marksOcrEntriesAndTheyAreNotClickable() {
+        val block = NodeGrounding.promptBlock(listOf(ocr(40, "爱学A", 700, 1200)), W, H)
+        assertTrue(block, block.contains(" ocr text=\"爱学A\""))
+        assertTrue(block, !block.contains("click"))
+    }
+
+    @Test
+    fun ocrEntriesResolveAndRelocateLikeNodes() {
+        val list = listOf(ocr(40, "爱学A", 700, 1200))
+        assertEquals(NodeGrounding.centerNorm(list[0], W, H)!!.first, NodeGrounding.resolveTapId(40, list, W, H)!!.xNorm)
+        val moved = listOf(ocr(41, "爱学A", 700, 1300))
+        assertEquals(NodeGrounding.centerNorm(moved[0], W, H)!!.second, NodeGrounding.relocate(40, list, moved, W, H)!!.yNorm)
+    }
 }

@@ -45,5 +45,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)
+    // 1d：端侧中文 OCR，模型打包进 APK，离线（DESIGN §5.3）
+    implementation(libs.mlkit.text.recognition.chinese)
     testImplementation(libs.junit)
 }

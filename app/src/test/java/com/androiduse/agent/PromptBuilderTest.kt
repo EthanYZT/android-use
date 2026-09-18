@@ -225,6 +225,12 @@ class PromptBuilderTest {
     }
 
     @Test
+    fun systemPromptExplainsOcrEntries() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains("ocr") && p.contains("截图里识别"))
+    }
+
+    @Test
     fun jsonStringEscapesQuotesBackslashesNewlinesAndControlChars() {
         assertEquals("\"a\\\"b\"", PromptBuilder.jsonString("a\"b"))
         assertEquals("\"a\\\\b\"", PromptBuilder.jsonString("a\\b"))
