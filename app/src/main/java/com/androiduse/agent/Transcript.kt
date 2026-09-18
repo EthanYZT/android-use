@@ -46,6 +46,9 @@ data class Observation(
     val nodes: List<NodeRecord>,
     val nodesBlock: String,
     val dumpError: String?,
+    /** 1d：OCR 补进 nodes 的条目数（进度行显示 `ocr+N`）；OCR 失败时 ocrError 非空。 */
+    val ocrCount: Int = 0,
+    val ocrError: String? = null,
 )
 
 /** 模型一次回复：content 是它的观察笔记，tool_calls 是动作。 */

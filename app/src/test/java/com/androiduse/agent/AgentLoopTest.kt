@@ -41,9 +41,10 @@ class AgentLoopTest {
         var refreshCount = 0
         override fun installedApps(): List<AppEntry> = apps
         override fun refreshNodes(): List<NodeRecord>? { refreshCount++; return refresh?.invoke() }
+        var ocrCount = 0
         override fun observe(stepIndex: Int): Observation {
             val nodes = nodesPerStep(stepIndex)
-            return Observation("IMG$stepIndex", null, nodes, NodeGrounding.promptBlock(nodes, screenW, screenH), null)
+            return Observation("IMG$stepIndex", null, nodes, NodeGrounding.promptBlock(nodes, screenW, screenH), null, ocrCount = ocrCount)
         }
         override fun perform(action: Action): Boolean { performed.add(action); return performOk }
     }
@@ -287,6 +288,16 @@ class AgentLoopTest {
         assertTrue(o.finished)
         assertEquals(AgentLoop.MAX_CALLS_PER_STEP, env.performed.size)
         assertEquals(AgentLoop.MAX_CALLS_PER_STEP + 2, o.transcript.steps[0].executions.size)
+    }
+
+    @Test
+    fun observeProgressLineReportsOcrEntries() {
+        val env = FakeEnv({ listOf(node(7, "x")) }).apply { ocrCount = 2 }
+        val lines = mutableListOf<String>()
+        val queue = mutableListOf(toolReply("1", "finish" to """{"summary":"s"}"""))
+        val client = ArkChatClient("k", "u", transport = { ArkChatClient.HttpResult(200, queue.removeAt(0)) })
+        runBlocking { AgentLoop(client, env, "glm", FakeSink()).run("t", 5) { lines += it } }
+        assertTrue(lines.joinToString("\n"), lines.any { it.contains("Observe") && it.contains("ocr+2") })
     }
 
     @Test

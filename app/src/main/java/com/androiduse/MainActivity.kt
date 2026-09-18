@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.androiduse.agent.AgentLoop
+import com.androiduse.perception.MlKitTextReader
 import com.androiduse.agent.ArkChatClient
 import com.androiduse.agent.Step
 import com.androiduse.agent.Transcript
@@ -35,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private val adapter = StepAdapter()
     private var job: Job? = null
 
+    companion object { const val EXTRA_TASK = "task" }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -46,6 +49,25 @@ class MainActivity : AppCompatActivity() {
         binding.rvSteps.adapter = adapter
         binding.btnRun.setOnClickListener { startTask() }
         binding.btnStop.setOnClickListener { job?.cancel() }
+        handleTaskExtra(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleTaskExtra(intent)
+    }
+
+    /**
+     * 调试入口（spec 1d §4.3）：`am start -n com.androiduse/.MainActivity --es task "<任务>"`（root 可起，
+     * Activity 未 exported）。收到 extra 自动填入并执行，让 adb 能驱动 App 进程跑任务（OCR 只在 App 进程可用）。
+     */
+    private fun handleTaskExtra(intent: Intent?) {
+        val task = intent?.getStringExtra(EXTRA_TASK)?.trim().orEmpty()
+        if (task.isEmpty()) return
+        intent?.removeExtra(EXTRA_TASK)
+        binding.etTask.setText(task)
+        if (job?.isActive != true) startTask()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -102,7 +124,7 @@ class MainActivity : AppCompatActivity() {
                         store.outcome(t, finished, summary)
                 }
                 val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
-                val outcome = AgentLoop(client, AndroidEnvironment(screen, packageManager), BuildConfig.ARK_MODEL_ID, sink)
+                val outcome = AgentLoop(client, AndroidEnvironment(screen, packageManager, MlKitTextReader), BuildConfig.ARK_MODEL_ID, sink)
                     .run(task) { line ->
                         Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
                         runOnUiThread { binding.toolbar.subtitle = line.take(90) }

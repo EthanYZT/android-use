@@ -71,7 +71,9 @@ class AgentLoop(
             val obs = raw.copy(screenshotPath = path)
             val step = Step(i, obs)
             t.steps += step
-            onProgress(line(i, "Observe", 0, "nodes=${obs.nodes.size}" + (obs.dumpError?.let { " 节点读取失败: ${it.take(80)}" } ?: "") + (if (obs.screenshotBase64 == null) " 截图失败" else "")))
+            onProgress(line(i, "Observe", 0, "nodes=${obs.nodes.size}" +
+                (if (obs.ocrCount > 0) " ocr+${obs.ocrCount}" else "") + (obs.ocrError?.let { " ocr失败: ${it.take(60)}" } ?: "") +
+                (obs.dumpError?.let { " 节点读取失败: ${it.take(80)}" } ?: "") + (if (obs.screenshotBase64 == null) " 截图失败" else "")))
             if (obs.screenshotBase64 == null && obs.nodes.isEmpty()) {
                 return@withContext abort(t, step, t0, "截图失败且读不到节点，无法观察屏幕", onProgress)
             }
