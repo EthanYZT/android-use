@@ -4,9 +4,8 @@ import com.androiduse.BuildConfig
 import com.androiduse.agent.AgentLoop
 import com.androiduse.agent.ArkChatClient
 import com.androiduse.AndroidEnvironment
-import com.androiduse.display.VirtualDisplayManager
+import com.androiduse.display.ScreenSessionCore
 import com.androiduse.log.TranscriptStore
-import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.DaemonClient
 import android.content.Context
 import android.content.pm.PackageManager
@@ -15,7 +14,7 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
- * 仅供真机端到端联调：无 UI 直接跑一遍 [AgentLoop]（建虚拟屏 → 启动设置 → 节点 grounding 循环）。
+ * 仅供真机端到端联调：无 UI 直接跑一遍 [AgentLoop]（守护进程建不可见虚拟屏 → 启动设置 → agent 循环）。
  * 绕开 App UI 驱动和 `input text` 不支持中文的问题——任务作为 argv 传进来。
  *
  * 用法：su root env CLASSPATH=<apk> app_process /system/bin \
@@ -34,13 +33,12 @@ object AgentCli {
         println("packageManager=${if (pm == null) "不可用(open_app 关闭)" else "ok"}")
 
         DaemonClient.apkPath = apkPath
-        ScreenCapture.cacheDir = File("/data/local/tmp") // CLI 以 root 跑，可读写
 
-        val screen = VirtualDisplayManager.create()
-        if (screen == null) { println("建屏失败"); return }
-        println("screen logicalId=${screen.logicalDisplayId} ${screen.widthPx}x${screen.heightPx}")
-        VirtualDisplayManager.launchIntentAction("android.settings.SETTINGS", screen)
-        Thread.sleep(2500)
+        // 与 App 同一条路：租约 → 守护进程建不可见屏 → 起设置。CLI 进程退出即租约 EOF，守护进程自行销屏。
+        val session = ScreenSessionCore(DaemonClient)
+        val screen = session.ensure()
+        if (screen == null) { println("建屏失败（守护进程不可达或 create_display 失败）"); return }
+        println("screen logicalId=${screen.logicalDisplayId} ${screen.widthPx}x${screen.heightPx} (headless)")
 
         val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
         val store = TranscriptStore(File("/data/local/tmp/androiduse_transcripts"))
@@ -52,7 +50,7 @@ object AgentCli {
             println("RESULT: finished=${outcome.finished} ${outcome.summary}")
             println("TRANSCRIPT: /data/local/tmp/androiduse_transcripts/${outcome.transcript.taskId}/transcript.jsonl")
         } finally {
-            VirtualDisplayManager.destroy()
+            session.destroy()
         }
         System.exit(0)
     }

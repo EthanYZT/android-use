@@ -7,12 +7,7 @@ import org.junit.Test
 
 class ActionCommandTest {
 
-    private val screen = VirtualScreen(
-        logicalDisplayId = 3,
-        surfaceFlingerId = 11529215046336967767uL.toLong(),
-        widthPx = 1080,
-        heightPx = 2376,
-    )
+    private val screen = VirtualScreen(logicalDisplayId = 3, widthPx = 1080, heightPx = 2376)
 
     @Test
     fun tapUsesLogicalDisplayIdAndPixelCoords() {

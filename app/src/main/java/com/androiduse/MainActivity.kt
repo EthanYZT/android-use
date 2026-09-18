@@ -17,7 +17,6 @@ import com.androiduse.agent.TranscriptSink
 import com.androiduse.agent.toStored
 import com.androiduse.databinding.ActivityMainBinding
 import com.androiduse.log.TranscriptStore
-import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.DaemonClient
 import com.androiduse.ui.StepAdapter
 import kotlinx.coroutines.CancellationException
@@ -43,7 +42,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
-        ScreenCapture.cacheDir = cacheDir
         // 守护进程复用本 App 的 APK 作 classpath（见 DaemonClient）。sourceDir 是 App 自控路径。
         DaemonClient.apkPath = applicationInfo.sourceDir
 

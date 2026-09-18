@@ -49,7 +49,7 @@ class SettingsActivity : AppCompatActivity() {
                         when {
                             s == null -> "建屏失败"
                             existed -> "已有虚拟屏 logicalId=${s.logicalDisplayId}"
-                            else -> "建屏成功 logicalId=${s.logicalDisplayId} sfId=${s.surfaceFlingerId.toULong()}，已打开设置"
+                            else -> "建屏成功 logicalId=${s.logicalDisplayId}（不可见虚拟屏），已打开设置"
                         }
                     )
                 } finally {

@@ -25,7 +25,7 @@ object DaemonClient : DisplayService {
 
     private const val TAG = "DaemonClient"
 
-    /** App 的 APK 路径（sourceDir）。由初始化时注入，与 ScreenCapture.cacheDir 一致的做法。 */
+    /** App 的 APK 路径（sourceDir）。由初始化时注入（MainActivity / CLI 入口）。 */
     lateinit var apkPath: String
 
     /** dump 指定逻辑屏的节点树。失败返回 [DumpCodec.DumpResult.Err]。 */
