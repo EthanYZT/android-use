@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicLong
  * framework，用 [UiAutomationFactory] 读任意屏（含虚拟屏）的节点树，通过 LocalSocket 回给 App。
  *
  * v1 只有一个 RPC：dump（见 [DumpCodec]）。截图/注入/建屏仍走 shell（spec §3 ①切法）。
+ * v2（1e）：守护进程还持有不可见虚拟屏（[DisplayHost]），RPC 加 create_display / destroy_display /
+ * frame / lease（见 [DaemonProtocol]）。有屏或有租约时不自杀；注入仍走 shell。
  *
  * 生命周期：空闲 [IDLE_TIMEOUT_MS] 无请求自杀，避免长期占用一个 root 进程；App 侧
  * [com.androiduse.root.DaemonClient] 在连不上时会重新拉起。
@@ -31,8 +33,10 @@ import java.util.concurrent.atomic.AtomicLong
  */
 object Daemon {
 
-    const val SOCKET_NAME = "androiduse_daemon_v1"
+    const val SOCKET_NAME = "androiduse_daemon_v2"
     private const val IDLE_TIMEOUT_MS = 60_000L
+
+    private val leases = LeaseRegistry()
 
     private val lastActivity = AtomicLong(System.currentTimeMillis())
 
@@ -66,29 +70,62 @@ object Daemon {
                 continue
             }
             lastActivity.set(System.currentTimeMillis())
+            var handedOff = false
             try {
-                handle(client)
+                handedOff = handle(client)
             } catch (e: Throwable) {
                 log("handle error: $e")
             } finally {
-                try { client.close() } catch (_: Throwable) {}
+                if (!handedOff) try { client.close() } catch (_: Throwable) {}
             }
             lastActivity.set(System.currentTimeMillis())
         }
     }
 
-    private fun handle(client: LocalSocket) {
+    /** 返回 true 表示连接已被租约线程接管，主循环不要关闭它。 */
+    private fun handle(client: LocalSocket): Boolean {
         val reader = BufferedReader(InputStreamReader(client.inputStream, StandardCharsets.UTF_8))
-        val line = reader.readLine() ?: return
-        val req = DumpCodec.parseRequest(line)
-        val response = if (req == null) {
-            DumpCodec.encodeError("bad request: ${line.take(80)}")
-        } else {
-            runDump(req)
-        }
+        val line = reader.readLine() ?: return false
+        val req = DaemonProtocol.parseRequest(line)
         val out = client.outputStream
-        out.write((response + "\n").toByteArray(StandardCharsets.UTF_8))
-        out.flush()
+        fun reply(s: String) { out.write((s + "\n").toByteArray(StandardCharsets.UTF_8)); out.flush() }
+        when (req) {
+            null -> reply(DumpCodec.encodeError("bad request: ${line.take(80)}"))
+            is DaemonProtocol.Request.Dump -> reply(runDump(DumpCodec.DumpRequest(req.displayId)))
+            is DaemonProtocol.Request.CreateDisplay -> reply(try {
+                val id = DisplayHost.create(req.w, req.h, req.dpi)
+                log("display created id=$id ${req.w}x${req.h}")
+                DaemonProtocol.encodeCreateOk(id, req.w, req.h)
+            } catch (e: Throwable) {
+                DumpCodec.encodeError("create failed: $e")
+            })
+            DaemonProtocol.Request.DestroyDisplay -> {
+                DisplayHost.destroy()
+                log("display destroyed (rpc)")
+                reply(DaemonProtocol.encodeOk())
+            }
+            is DaemonProtocol.Request.Frame -> reply(try {
+                val jpeg = DisplayHost.encodeJpeg(req.maxWidth, req.quality)
+                if (jpeg == null) DaemonProtocol.encodeFrameEmpty()
+                else DaemonProtocol.encodeFrameOk(android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP))
+            } catch (e: Throwable) {
+                DumpCodec.encodeError("frame failed: $e")
+            })
+            DaemonProtocol.Request.Lease -> {
+                // 租约：响应后连接保持打开，读到 EOF（App 关闭或进程死亡）即销屏。旧租约被替换后的 EOF 不销屏。
+                val token = leases.open()
+                reply(DaemonProtocol.encodeOk())
+                Thread {
+                    try { while (client.inputStream.read() >= 0) { /* 租约期间不期待任何数据 */ } } catch (_: Throwable) {}
+                    if (leases.close(token)) { log("lease $token EOF, destroying display"); DisplayHost.destroy() }
+                    else log("stale lease $token EOF, ignored")
+                    try { client.close() } catch (_: Throwable) {}
+                    lastActivity.set(System.currentTimeMillis())
+                }.apply { isDaemon = true; name = "aud-lease-$token"; start() }
+                return true
+            }
+        }
+        return false
     }
 
     /** 拿到（必要时新建）复用的 UiAutomation 连接。 */
@@ -128,8 +165,9 @@ object Daemon {
         Thread {
             while (true) {
                 try { Thread.sleep(5_000) } catch (_: InterruptedException) {}
-                if (System.currentTimeMillis() - lastActivity.get() > IDLE_TIMEOUT_MS) {
-                    log("idle ${IDLE_TIMEOUT_MS}ms, exiting")
+                val idle = System.currentTimeMillis() - lastActivity.get() > IDLE_TIMEOUT_MS
+                if (idle && !DisplayHost.hasDisplay() && !leases.hasLease()) {
+                    log("idle ${IDLE_TIMEOUT_MS}ms with no display/lease, exiting")
                     resetConnection() // 退出前断开，撤掉「有自动化在跑」的系统状态
                     System.exit(0)
                 }

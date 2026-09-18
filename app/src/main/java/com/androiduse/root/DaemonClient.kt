@@ -27,14 +27,7 @@ object DaemonClient {
 
     /** dump 指定逻辑屏的节点树。失败返回 [DumpCodec.DumpResult.Err]。 */
     fun dump(displayId: Int): DumpCodec.DumpResult {
-        // 先直接试连（守护进程可能已在跑）；连不上再拉起、退避重试。
-        var socket = tryConnect()
-        if (socket == null) {
-            Log.i(TAG, "daemon not up, launching")
-            ensureStarted()
-            socket = connectWithBackoff()
-        }
-        if (socket == null) return DumpCodec.DumpResult.Err("daemon unreachable")
+        val socket = openRawSocket() ?: return DumpCodec.DumpResult.Err("daemon unreachable")
 
         return socket.use { s ->
             try {
@@ -47,6 +40,28 @@ object DaemonClient {
                 DumpCodec.parseResponse(line)
             } catch (e: Exception) {
                 DumpCodec.DumpResult.Err("io error: ${e.message}")
+            }
+        }
+    }
+
+    /** 连上（必要时拉起）守护进程并返回裸 socket；连不上返回 null。先直接试连，连不上再拉起、退避重试。 */
+    fun openRawSocket(): LocalSocket? {
+        tryConnect()?.let { return it }
+        Log.i(TAG, "daemon not up, launching")
+        ensureStarted()
+        return connectWithBackoff()
+    }
+
+    /** 发一行、收一行、关连接。连不上/IO 失败返回 null。 */
+    fun rawRequest(line: String): String? {
+        val s = openRawSocket() ?: return null
+        return s.use {
+            try {
+                it.outputStream.write((line + "\n").toByteArray(StandardCharsets.UTF_8))
+                it.outputStream.flush()
+                BufferedReader(InputStreamReader(it.inputStream, StandardCharsets.UTF_8)).readLine()
+            } catch (e: Exception) {
+                null
             }
         }
     }
