@@ -250,4 +250,26 @@ class PromptBuilderTest {
         assertEquals("\"a\\nb\"", PromptBuilder.jsonString("a\nb"))
         assertEquals("\"a\\u0001b\"", PromptBuilder.jsonString("a" + 1.toChar() + "b"))
     }
+
+    @Test
+    fun systemPromptCarriesStartTimeAndSystemToolsRule() {
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val now = com.androiduse.capability.TimeText.parseDateTime("2026-09-18 16:52", zone)!!
+        val sp = PromptBuilder.systemPrompt(emptyList(), now, zone)
+        assertTrue(sp, sp.contains("现在是 2026-09-18 16:52 星期五"))
+        assertTrue(sp.contains(PromptBuilder.SYSTEM_TOOLS_RULE))
+        val t = Transcript("t", "设闹钟", "glm", now, 1080, 2376)
+        t.steps.add(Step(1, obs(1)))
+        assertTrue(PromptBuilder.buildRequestBody(t, zone).contains("2026-09-18 16:52"))
+    }
+
+    @Test
+    fun toolsJsonDeclaresAllNineSystemTools() {
+        val tools = PromptBuilder.toolsJson()
+        for (name in com.androiduse.capability.SystemCallParser.TOOL_NAMES) {
+            assertTrue(name, tools.contains("\"name\":\"$name\""))
+        }
+        assertTrue(tools.contains("YYYY-MM-DD HH:mm"))
+        assertTrue(tools.contains(com.androiduse.capability.SettingsPage.keys()))
+    }
 }
