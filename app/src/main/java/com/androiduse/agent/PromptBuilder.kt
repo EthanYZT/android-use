@@ -57,6 +57,9 @@ object PromptBuilder {
     /** 软路由规则（spec §1）：系统接口工具优先，停在中间页再用界面接手。 */
     const val SYSTEM_TOOLS_RULE = "闹钟、日历、联系人、短信、拨号、导航、设置页各有专用工具（set_alarm / calendar_* / contacts_lookup / sms_compose / dial / navigate / open_settings），能用就直接用，不要在界面里一步步点；这些工具停在中间页（短信编辑页、拨号盘、地图）时再用界面操作接着做。时间一律写绝对时间，按系统提示里的当前时间换算\"明天\"\"下周二\"。"
 
+    /** 开局空屏：虚拟屏建好后不再预开设置页，模型第一步看到的是黑屏、空列表——不是加载中。 */
+    const val EMPTY_START_RULE = "任务开始时这块屏幕是空的（黑屏、元素列表为空），这不是在加载：直接用 open_app 或专用工具打开需要的 App，不要 wait。只有 App 已经打开、界面还在加载时列表为空才 wait。"
+
     /** 交接规则（spec handoff §2）：付款与人机验证必须本人操作；短信验证码、发送/拨出/导航不交接。 */
     const val HANDOFF_RULE = "付款、提交订单、结算确认，以及滑块/选图这类人机验证，必须由用户本人操作：做到那一页就调用 handoff 说明停在哪，不要自己点支付、不要拖滑块。短信验证码不算，自己从通知或界面读。发送短信、拨出电话、开始导航可以直接做。"
 
@@ -86,7 +89,7 @@ object PromptBuilder {
         - 目标元素在列表里时，**优先用 tap 的 id 形态**，不要自己猜坐标。
         - 目标不在列表里（图标、图片等）才用 tap 的 x/y 坐标兜底。
         - 任务的所有部分都完成后调用 finish，summary 里写清结果和查到的信息；不要重复确认已经做过的事。
-        - 界面还在加载、列表为空时调用 wait。
+        - $EMPTY_START_RULE
         - 要输入文字时直接调用 type（文字会直接写进输入框）。这块屏幕上**永远不会弹出键盘**，不要点输入框等键盘、不要用 wait 等键盘。搜索类任务用 type 的 submit=true 一步完成输入和提交。
         - 任务需要用到另一个 App 时，直接调用 open_app 按名字打开它；**不要**用 back 一路退出当前 App 去找桌面，这块屏幕上没有桌面。
         - $SYSTEM_TOOLS_RULE
@@ -161,8 +164,10 @@ object PromptBuilder {
         val text = StringBuilder("第 ${step.index} 步屏幕。\n")
         if (!(keepImage && o.screenshotBase64 != null)) text.append("[第 ${step.index} 步截图已省略]\n")
         when {
-            o.dumpError != null || o.nodesBlock.isEmpty() ->
+            o.dumpError != null ->
                 text.append("可点/可读元素列表：（本次读取不到，只能凭截图操作）")
+            o.nodesBlock.isEmpty() ->
+                text.append("可点/可读元素列表：（空——屏幕上没有任何元素；任务刚开始时这是正常的空屏，先 open_app）")
             keepNodes -> text.append("可点/可读元素列表：\n").append(o.nodesBlock)
             else -> text.append("[第 ${step.index} 步节点列表已省略，共 ${o.nodes.size} 个元素]")
         }

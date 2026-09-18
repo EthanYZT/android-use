@@ -26,16 +26,16 @@ class ScreenSessionCoreTest {
         override fun destroyDisplay(): Boolean { log += "destroy"; return true }
         override fun frame(maxWidth: Int, quality: Int): DaemonProtocol.FrameResult =
             if (frameOk) DaemonProtocol.FrameResult.Empty else DaemonProtocol.FrameResult.Err("dead")
-        override fun launchSettings(displayId: Int): Boolean { log += "settings$displayId"; return true }
     }
 
-    private fun core(f: Fake) = ScreenSessionCore(f, settleMs = 0, sleep = {})
+    private fun core(f: Fake) = ScreenSessionCore(f)
 
     @Test
-    fun ensureOpensLeaseCreatesAndLaunchesSettingsInOrder() {
+    fun ensureOpensLeaseAndCreatesDisplayOnlyNoSettingsPage() {
+        // 1e 后空屏是安全黑帧、open_app 也有了：不再顺手起设置页，模型开局看到的就是空屏。
         val f = Fake(); val c = core(f)
         assertEquals(VirtualScreen(9, 1080, 2376), c.ensure())
-        assertEquals(listOf("lease", "create", "settings9"), f.log)
+        assertEquals(listOf("lease", "create"), f.log)
     }
 
     @Test

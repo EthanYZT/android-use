@@ -59,6 +59,26 @@ class PromptBuilderTest {
         return depth == 0 && !inStr
     }
 
+
+    @Test
+    fun systemPromptSaysTheScreenStartsEmptyAndNotToWaitForIt() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains(PromptBuilder.EMPTY_START_RULE))
+        assertTrue(p, p.contains("任务开始时这块屏幕是空的"))
+    }
+
+    @Test
+    fun emptyScreenWithoutDumpErrorIsDescribedAsEmptyNotUnreadable() {
+        val t = Transcript("t", "看型号", "glm", 0L, 1080, 2376)
+        t.steps.add(Step(1, Observation("IMG1", null, emptyList(), "", null)))
+        val body = PromptBuilder.buildRequestBody(t)
+        assertTrue(body, body.contains("屏幕上没有任何元素"))
+        assertFalse(body, body.contains("读取不到"))
+        val bad = Transcript("t", "看型号", "glm", 0L, 1080, 2376)
+        bad.steps.add(Step(1, obs(1, dumpError = "daemon unreachable")))
+        assertTrue(PromptBuilder.buildRequestBody(bad).contains("读取不到"))
+    }
+
     @Test
     fun bodyIsValidJsonWithModelToolsAndMaxTokens() {
         val body = PromptBuilder.buildRequestBody(transcript(0))

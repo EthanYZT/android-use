@@ -59,7 +59,7 @@
     <string name="settings_config_format">model    %1$s\nendpoint %2$s</string>
     <string name="settings_config_missing">未配置（在 local.properties 填写 ark.modelId / ark.baseUrl）</string>
     <string name="debug_check_root">检查 Root</string>
-    <string name="debug_create_screen">建虚拟屏并打开设置</string>
+    <string name="debug_create_screen">建虚拟屏</string>
     <string name="debug_destroy_screen">销毁虚拟屏</string>
     <string name="debug_capture">截图虚拟屏</string>
     <string name="debug_log_empty">调试输出会显示在这里</string>

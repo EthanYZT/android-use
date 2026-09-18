@@ -13,6 +13,4 @@ interface DisplayService {
     fun createDisplay(w: Int, h: Int, dpi: Int): DaemonProtocol.CreateResult
     fun destroyDisplay(): Boolean
     fun frame(maxWidth: Int, quality: Int): DaemonProtocol.FrameResult
-    /** 在该屏起系统设置（open_app 落地前的过渡起点，避免空黑屏）。 */
-    fun launchSettings(displayId: Int): Boolean
 }

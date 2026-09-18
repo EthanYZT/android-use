@@ -523,6 +523,7 @@ fn preflight(action, expected_context) -> Decision:
 - **2a 系统接口（2026-09-18，分支 `stage2a-system-interfaces`，未合并）**：九个工具（闹钟/日历查建改/联系人/短信编辑/拨号/导航/设置页）软路由接入，实现与单测完成；真机验收通过：短信跳板泄漏已修（已知跳板改直起会话页 + 每次 Intent 启动后核对落屏，泄漏即撤回报失败），③/dial 复验落虚拟屏；AgentCli 不能用 Provider 类工具（产品路径是 App 进程）。见 spec `superpowers/specs/2026-09-18-2a-system-interfaces-design.md` §7、§7.1。2b MCP 待做。
 - **交接与接管（2026-09-18）**：`handoff` 工具（付款/提交订单/结算确认、滑块/选图类人机验证时停下）+ 结束卡片"在手机上继续"（`am display move-stack` 把虚拟屏任务从底到顶搬到物理屏，顶层任务在前台，其余落后台，然后销毁空虚拟屏）。同日修了提示词元素列表选取（优先级+分段配额，不再按树顺序截 60 条）。验收见 spec `superpowers/specs/2026-09-18-handoff-takeover-design.md` §8。
 - **后台运行（2026-09-18）**：App 切后台 5 秒即被 ColorOS HANS 冻结（`freeze uid … StrictMode-3`）并拉进网络黑名单，模型请求挂死、切回前台时以 connection abort / Unable to resolve host 中止。修：任务期间起 `AgentForegroundService`（specialUse 前台服务）+ 任务开始时 `BackgroundExemption` 用 root `dumpsys deviceidle whitelist +包名` 自加 Doze 白名单。真机验证：只有前台服务不够（照冻）；加白名单后降到 StrictMode-1——不再断网，冻结会被到达的网络包解冻，多步任务在后台跑完。appops RUN_ANY_IN_BACKGROUND 无效；`/data/oplus/os/bpm/bpm.xml` 的 `<gs>` 名单改了不重启不生效（未验证重启）。
+- **开局空屏（2026-09-18）**：建虚拟屏后不再预开设置页（1e 之前为避免空黑屏/镜像的过渡做法）。模型第一步看到黑屏+空列表，提示词 `EMPTY_START_RULE` 说明这是正常空屏、直接 open_app/专用工具而不是 wait；观察消息区分"读取不到"与"屏幕为空"。真机：开局 0 元素，模型第一步直接 open_app 时钟，2 步完成。
 
 ### 阶段 3：GUI 兜底 + 安全网关
 - **目标**：GUI 覆盖任意 App；安全网关全量生效。

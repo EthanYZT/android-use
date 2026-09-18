@@ -117,9 +117,6 @@ object DaemonClient : DisplayService {
         return DaemonProtocol.parseSimpleResponse(line)
     }
 
-    override fun launchSettings(displayId: Int): Boolean =
-        RootShell.execArgv(listOf("am", "start", "--display", displayId.toString(), "-a", "android.settings.SETTINGS", "-f", "0x18000000")).ok
-
     private fun tryConnect(): LocalSocket? =
         try {
             LocalSocket().apply {
