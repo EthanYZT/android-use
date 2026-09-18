@@ -100,7 +100,6 @@ class MainActivity : AppCompatActivity() {
             setRunning(true)
             adapter.submit(emptyList())
             binding.tvResult.visibility = View.GONE
-            binding.btnTakeover.visibility = View.GONE
             try {
                 binding.toolbar.subtitle = getString(R.string.status_preparing_screen)
                 val screen = withContext(Dispatchers.IO) { ScreenSession.ensure() }
@@ -146,6 +145,8 @@ class MainActivity : AppCompatActivity() {
         binding.etTask.isEnabled = !running
         binding.btnStop.visibility = if (running) View.VISIBLE else View.GONE
         binding.progress.visibility = if (running) View.VISIBLE else View.GONE
+        // 任务一开跑，虚拟屏上的旧结果不再代表当前状态：先把接管按钮收起来，避免跟正在跑的新任务打架（见 takeover() 的守卫）。
+        if (running) binding.btnTakeover.visibility = View.GONE
         if (!running) binding.toolbar.subtitle = null
     }
 
@@ -164,14 +165,20 @@ class MainActivity : AppCompatActivity() {
         }
         binding.tvResult.text = label
         binding.tvResult.visibility = View.VISIBLE
+        // 这个查询是脱离 job 的独立协程（IO 耗时），期间用户可能已经点了停止或开了新任务——
+        // job 字段会变成别的 Job、或还是这个 Job 但已经在跑。只有"还是当初那个 job 且它已经结束"才把结果应用到按钮上。
+        val myJob = job
         lifecycleScope.launch {
             val show = withContext(Dispatchers.IO) { ScreenHandover.hasTakeoverTarget() }
-            binding.btnTakeover.visibility = if (show) View.VISIBLE else View.GONE
-            binding.btnTakeover.isEnabled = true
+            if (job === myJob && job?.isActive != true) {
+                binding.btnTakeover.visibility = if (show) View.VISIBLE else View.GONE
+                binding.btnTakeover.isEnabled = true
+            }
         }
     }
 
     private fun takeover() {
+        if (job?.isActive == true) return // 任务还在跑就不能接管；按钮此时其实也应该是隐藏的（setRunning），这里再兜底一层。
         binding.btnTakeover.isEnabled = false
         binding.toolbar.subtitle = getString(R.string.status_taking_over)
         lifecycleScope.launch {

@@ -27,4 +27,28 @@ class HandoverPlanTest {
     @Test fun moveArgvTargetsPhysicalDisplayZero() {
         assertEquals(listOf("am", "display", "move-stack", "278", "0"), HandoverPlan.moveArgv(278))
     }
+
+    @Test fun verifyOkWhenTargetIsFirstOnPhysicalAndVirtualIsEmptyOfForeignTasks() {
+        val physical = listOf(t(278, "com.autonavi.minimap"), t(10, "com.androiduse"))
+        val virtual = listOf(t(21, "com.androiduse"))
+        assertEquals(HandoverPlan.Verify.Ok, HandoverPlan.verify(physical, virtual, 278, "com.androiduse"))
+    }
+
+    @Test fun verifyNotOnTopWithEmptyLeftWhenTargetPresentButNotFirst() {
+        val physical = listOf(t(10, "com.androiduse"), t(278, "com.autonavi.minimap"))
+        val virtual = emptyList<DisplayTasks.Task>()
+        assertEquals(HandoverPlan.Verify.NotOnTop(emptyList()), HandoverPlan.verify(physical, virtual, 278, "com.androiduse"))
+    }
+
+    @Test fun verifyNotOnTopWithLeftWhenTargetFirstButForeignTaskStillOnVirtual() {
+        val physical = listOf(t(278, "com.autonavi.minimap"))
+        val virtual = listOf(t(99, "com.android.settings"))
+        assertEquals(HandoverPlan.Verify.NotOnTop(listOf(99)), HandoverPlan.verify(physical, virtual, 278, "com.androiduse"))
+    }
+
+    @Test fun verifyNotMovedWhenTargetAbsentFromPhysical() {
+        val physical = listOf(t(10, "com.androiduse"))
+        val virtual = listOf(t(278, "com.autonavi.minimap"), t(99, "com.android.settings"))
+        assertEquals(HandoverPlan.Verify.NotMoved(listOf(278, 99)), HandoverPlan.verify(physical, virtual, 278, "com.androiduse"))
+    }
 }

@@ -72,7 +72,9 @@ object OcrMerge {
 - 行文字 `trim()` 后为空、或全是标点/符号 → 丢弃（图标字体常被识别成单个符号）。
 - 保留的行按 (top, left) 排序后编号，`clickable=false`、`scrollable=false`、`resId=""`、`className="ocr"`，
   `text` 为识别文字、`desc=""`。
-- 最多 `MAX_OCR_ENTRIES` 条；整个列表仍受 `NodeGrounding.MAX_NODES_IN_PROMPT`（60）约束，节点在前 OCR 在后。
+- 最多 `MAX_OCR_ENTRIES` 条；整个列表仍受 `NodeGrounding.MAX_NODES_IN_PROMPT`（80）约束，取舍规则是优先级 + 按屏幕分段
+  （y 方向切 `BANDS` 段，每段先保底配额、剩余名额再按优先级全局补，见 `NodeGrounding.selectForPrompt`），最终按屏幕阅读
+  顺序（先 y 后 x）输出——不再是"节点在前 OCR 在后"，OCR 补洞条目按自己在屏幕上的位置跟普通节点交叉穿插。
 
 `NodeGrounding.promptBlock`：`className == "ocr"` 的条目在坐标后打 ` ocr` 标记（与 ` click`/` scroll` 同位）。
 系统提示加一句：**带 ocr 标记的条目是从截图里识别出来的文字，不是界面元素：位置可能略偏，不一定能点，

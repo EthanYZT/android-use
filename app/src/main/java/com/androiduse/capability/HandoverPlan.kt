@@ -17,4 +17,28 @@ object HandoverPlan {
         tasksTopToBottom.firstOrNull { it.pkg != ownPkg }?.id
 
     fun moveArgv(taskId: Int): List<String> = listOf("am", "display", "move-stack", taskId.toString(), PHYSICAL_DISPLAY.toString())
+
+    sealed class Verify {
+        /** 目标在 display 0 且虚拟屏已空（不再有非本包任务）。 */
+        object Ok : Verify()
+        /** 目标已经到了 display 0，但不在第一位（虚拟屏可能已空，也可能还有别的任务留在上面）。 */
+        data class NotOnTop(val leftOnVirtual: List<Int>) : Verify()
+        /** 目标仍不在 display 0（一步都没搬过去）。 */
+        data class NotMoved(val leftOnVirtual: List<Int>) : Verify()
+    }
+
+    /** 搬完后的判定：physical/virtual 都是自顶向下的任务列表。只有目标在 display 0 且虚拟屏上不再有非本包任务才算 Ok。 */
+    fun verify(
+        physicalTopToBottom: List<DisplayTasks.Task>,
+        virtualTopToBottom: List<DisplayTasks.Task>,
+        target: Int,
+        ownPkg: String,
+    ): Verify {
+        val left = virtualTopToBottom.filter { it.pkg != ownPkg }.map { it.id }
+        return when {
+            physicalTopToBottom.none { it.id == target } -> Verify.NotMoved(left)
+            left.isNotEmpty() || physicalTopToBottom.first().id != target -> Verify.NotOnTop(left)
+            else -> Verify.Ok
+        }
+    }
 }

@@ -50,6 +50,7 @@ object AgentCli {
             }
             println("RESULT: finished=${outcome.finished} handoff=${outcome.handoff} ${outcome.summary}")
             println("TRANSCRIPT: /data/local/tmp/androiduse_transcripts/${outcome.transcript.taskId}/transcript.jsonl")
+            if (outcome.handoff) println("HANDOFF: CLI 没有接管按钮，虚拟屏随进程销毁；要接管请用 App 跑此任务")
         } finally {
             session.destroy()
         }

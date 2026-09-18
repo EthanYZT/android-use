@@ -71,11 +71,12 @@ class AgentLoopTest {
         vararg responses: String,
         env: FakeEnv = FakeEnv({ listOf(node(0, "返回"), node(7, "关于本机")) }),
         maxSteps: Int = 15,
+        sink: FakeSink = FakeSink(),
     ): Triple<AgentLoop.Outcome, FakeEnv, List<String>> {
         val sent = mutableListOf<String>()
         val queue = responses.toMutableList()
         val client = ArkChatClient("k", "u", transport = { body -> sent.add(body); ArkChatClient.HttpResult(200, queue.removeAt(0)) })
-        val loop = AgentLoop(client, env, "glm", FakeSink())
+        val loop = AgentLoop(client, env, "glm", sink)
         val outcome = runBlocking { loop.run("看型号", maxSteps) { } }
         return Triple(outcome, env, sent)
     }
@@ -241,9 +242,11 @@ class AgentLoopTest {
 
     @Test
     fun handoffEndsTheLoopWithHandoffKindAndReasonAsSummary() {
+        val sink = FakeSink()
         val (o, env, _) = harness(
             toolReply("到结算页了", "tap" to """{"id":7}"""),
             toolReply("要付款了", "handoff" to """{"reason":"停在结算页，需要你付款"}"""),
+            sink = sink,
         )
         assertFalse(o.finished)
         assertEquals(AgentLoop.Kind.HANDOFF, o.kind)
@@ -251,6 +254,8 @@ class AgentLoopTest {
         assertEquals("停在结算页，需要你付款", o.summary)
         assertEquals(2, o.transcript.steps.size)
         assertEquals("handoff", o.transcript.steps[1].execution!!.result)
+        // sink 收到的 outcome 也要如实带上 handoff=true（M3：之前只记录不断言）。
+        assertEquals(true, sink.outcomeHandoff)
     }
 
     @Test
@@ -265,8 +270,11 @@ class AgentLoopTest {
 
     @Test
     fun finishedAndAbortedOutcomesCarryTheirKind() {
-        val (fin, _, _) = harness(toolReply("完成", "finish" to """{"summary":"done"}"""))
+        val finSink = FakeSink()
+        val (fin, _, _) = harness(toolReply("完成", "finish" to """{"summary":"done"}"""), sink = finSink)
         assertEquals(AgentLoop.Kind.FINISHED, fin.kind)
+        // 正常完成时 sink 收到的 outcome.handoff 要如实为 false（对照上面 handoff 用例的 true）。
+        assertEquals(false, finSink.outcomeHandoff)
         val (ab, _, _) = harness(textReply("没有工具"), textReply("还是没有"))
         assertEquals(AgentLoop.Kind.ABORTED, ab.kind)
         assertFalse(ab.handoff)

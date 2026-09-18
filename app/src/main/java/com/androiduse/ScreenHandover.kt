@@ -13,8 +13,11 @@ object ScreenHandover {
     private const val TAG = "ScreenHandover"
     private const val OWN_PKG = BuildConfig.APPLICATION_ID
 
-    private fun tasksOn(displayId: Int): List<DisplayTasks.Task> =
-        DisplayTasks.parse(RootShell.execArgv(listOf("dumpsys", "activity", "activities")).stdout)[displayId] ?: emptyList()
+    /** 一次 dump，按屏拆分；tasksOn 只是取其中一屏，避免两次 dump 之间状态不一致。 */
+    private fun tasksByDisplay(): Map<Int, List<DisplayTasks.Task>> =
+        DisplayTasks.parse(RootShell.execArgv(listOf("dumpsys", "activity", "activities")).stdout)
+
+    private fun tasksOn(displayId: Int): List<DisplayTasks.Task> = tasksByDisplay()[displayId] ?: emptyList()
 
     /** 虚拟屏上有没有可接管的页面（非本 App 任务）。 */
     fun hasTakeoverTarget(): Boolean {
@@ -30,12 +33,30 @@ object ScreenHandover {
             val r = RootShell.execArgv(HandoverPlan.moveArgv(id))
             if (!r.ok) Log.w(TAG, "move-stack $id failed: ${r.stderr.ifBlank { r.stdout }}")
         }
-        val physical = tasksOn(HandoverPlan.PHYSICAL_DISPLAY)
-        if (physical.firstOrNull()?.id != target) {
-            val left = tasksOn(s.logicalDisplayId).map { it.id }
-            return Result.failure(IllegalStateException("没能把页面搬到手机屏幕（目标 #$target，仍在虚拟屏: $left）"))
+        val dump1 = tasksByDisplay()
+        return when (val v = HandoverPlan.verify(dump1[HandoverPlan.PHYSICAL_DISPLAY] ?: emptyList(), dump1[s.logicalDisplayId] ?: emptyList(), target, OWN_PKG)) {
+            HandoverPlan.Verify.Ok -> {
+                ScreenSession.destroy()
+                Result.success(Unit)
+            }
+            is HandoverPlan.Verify.NotOnTop -> {
+                // 再搬一次目标本身（比如它到了 display 0 但没置顶），再 dump 一次核对。
+                val r = RootShell.execArgv(HandoverPlan.moveArgv(target))
+                if (!r.ok) Log.w(TAG, "re-move-stack $target failed: ${r.stderr.ifBlank { r.stdout }}")
+                val dump2 = tasksByDisplay()
+                val v2 = HandoverPlan.verify(dump2[HandoverPlan.PHYSICAL_DISPLAY] ?: emptyList(), dump2[s.logicalDisplayId] ?: emptyList(), target, OWN_PKG)
+                if (v2 == HandoverPlan.Verify.Ok) {
+                    ScreenSession.destroy()
+                    Result.success(Unit)
+                } else {
+                    Result.failure(IllegalStateException(
+                        if (v.leftOnVirtual.isEmpty()) "页面已搬到手机，但没能置顶；请从最近任务打开"
+                        else "页面已搬到手机但没能置顶，且虚拟屏上还有任务 #${v.leftOnVirtual}；请从最近任务打开"
+                    ))
+                }
+            }
+            is HandoverPlan.Verify.NotMoved ->
+                Result.failure(IllegalStateException("没能把页面搬到手机屏幕（目标 #$target 仍在虚拟屏，虚拟屏上还有: ${v.leftOnVirtual}）"))
         }
-        ScreenSession.destroy()
-        return Result.success(Unit)
     }
 }
