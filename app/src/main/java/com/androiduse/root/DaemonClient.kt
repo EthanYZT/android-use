@@ -106,8 +106,13 @@ object DaemonClient : DisplayService {
         return DaemonProtocol.parseFrameResponse(line)
     }
 
+    /**
+     * `-f 0x18000000`（NEW_TASK|MULTIPLE_TASK）不可省：2026-09-18 E2E 实测不带它时 `am start --display`
+     * 会把物理屏后台已有的设置任务**搬到**虚拟屏（首帧停在用户上次看的 WLAN 页），销屏时连同用户的
+     * 任务一起销毁。与 open_app（ActionCommand.openAppArgv）同一条规则。
+     */
     override fun launchSettings(displayId: Int): Boolean =
-        RootShell.execArgv(listOf("am", "start", "--display", displayId.toString(), "-a", "android.settings.SETTINGS")).ok
+        RootShell.execArgv(listOf("am", "start", "--display", displayId.toString(), "-a", "android.settings.SETTINGS", "-f", "0x18000000")).ok
 
     private fun tryConnect(): LocalSocket? =
         try {
