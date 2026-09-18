@@ -37,7 +37,13 @@ class MainActivity : AppCompatActivity() {
     private val adapter = StepAdapter()
     private var job: Job? = null
 
-    companion object { const val EXTRA_TASK = "task" }
+    companion object {
+        const val EXTRA_TASK = "task"
+        /** 通知按钮：停止当前任务。 */
+        const val EXTRA_STOP = "stop"
+        /** 通知按钮：直接接管（把虚拟屏上的页面搬到手机屏）。 */
+        const val EXTRA_TAKEOVER = "takeover"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,12 +58,21 @@ class MainActivity : AppCompatActivity() {
         binding.btnStop.setOnClickListener { job?.cancel() }
         binding.btnTakeover.setOnClickListener { takeover() }
         handleTaskExtra(intent)
+        handleAlertExtras(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleTaskExtra(intent)
+        handleAlertExtras(intent)
+    }
+
+    /** 通知上的按钮（TaskNotifier）：停止任务 / 在手机上继续。extra 用完即删，避免旋转重建时重复触发。 */
+    private fun handleAlertExtras(intent: Intent?) {
+        if (intent == null) return
+        if (intent.getBooleanExtra(EXTRA_STOP, false)) { intent.removeExtra(EXTRA_STOP); job?.cancel() }
+        if (intent.getBooleanExtra(EXTRA_TAKEOVER, false)) { intent.removeExtra(EXTRA_TAKEOVER); takeover() }
     }
 
     /**
@@ -125,6 +140,7 @@ class MainActivity : AppCompatActivity() {
                         store.saveNodes(t, stepIndex, nodes, ocrLines)
                     override fun step(t: Transcript, step: Step) {
                         store.step(t, step)
+                        if (com.androiduse.ui.TaskAlerts.shouldRemind(step.index)) com.androiduse.ui.TaskNotifier.stepReminder(applicationContext, task, step.index)
                         val stored = step.toStored()
                         runOnUiThread {
                             adapter.add(stored)
@@ -141,6 +157,8 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread { binding.toolbar.subtitle = line.take(90) }
                     }
                 showResult(outcome)
+                if (outcome.handoff) com.androiduse.ui.TaskNotifier.handoff(applicationContext, outcome.summary)
+                else com.androiduse.ui.TaskNotifier.outcome(applicationContext, outcome.finished, outcome.summary)
             } catch (e: CancellationException) {
                 showResult(null)
             } finally {
