@@ -19,7 +19,13 @@ object ToolCallResolver {
         data class Err(val message: String) : Resolution()
     }
 
-    fun resolve(call: ToolCall, nodes: List<NodeRecord>, screenW: Int, screenH: Int): Resolution {
+    fun resolve(
+        call: ToolCall,
+        nodes: List<NodeRecord>,
+        screenW: Int,
+        screenH: Int,
+        apps: List<AppEntry> = emptyList(),
+    ): Resolution {
         val a = call.argumentsJson
         return when (call.name) {
             "tap" -> {
@@ -43,6 +49,14 @@ object ToolCallResolver {
                 else Resolution.Ok(Action.Swipe(x1, y1, x2, y2, ResponseParser.intField(a, "duration") ?: 300))
             }
             "back" -> Resolution.Ok(Action.Back)
+            "open_app" -> {
+                val name = ResponseParser.field(a, "name")?.trim().orEmpty()
+                if (name.isEmpty()) return Resolution.Err("open_app 需要 name（App 的显示名）")
+                if (apps.isEmpty()) return Resolution.Err("当前没有可打开的 App 列表，open_app 不可用")
+                val app = AppCatalog.resolve(name, apps)
+                    ?: return Resolution.Err("没有名为 ${UntrustedText.sanitize(name)} 的 App。可用：${AppCatalog.promptList(apps)}")
+                Resolution.Ok(Action.OpenApp(app.label, app.component))
+            }
             "wait" -> Resolution.Ok(Action.Wait(Action.Wait.clamp(ResponseParser.intField(a, "ms") ?: 500)))
             "finish" -> Resolution.Ok(Action.Finish(ResponseParser.field(a, "summary") ?: ""))
             else -> Resolution.Err("没有名为 ${call.name.take(30)} 的工具")

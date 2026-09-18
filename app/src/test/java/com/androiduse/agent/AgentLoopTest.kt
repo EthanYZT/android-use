@@ -31,10 +31,12 @@ class AgentLoopTest {
     private class FakeEnv(
         private val nodesPerStep: (Int) -> List<NodeRecord>,
         private val performOk: Boolean = true,
+        private val apps: List<AppEntry> = emptyList(),
     ) : Environment {
         override val screenW = 1000
         override val screenH = 2000
         val performed = mutableListOf<Action>()
+        override fun installedApps(): List<AppEntry> = apps
         override fun observe(stepIndex: Int): Observation {
             val nodes = nodesPerStep(stepIndex)
             return Observation("IMG$stepIndex", null, nodes, NodeGrounding.promptBlock(nodes, screenW, screenH), null)
@@ -174,6 +176,20 @@ class AgentLoopTest {
         )
         assertFalse(o.finished)
         assertTrue(o.summary, o.summary.contains("正在找超时设置"))
+    }
+
+    @Test
+    fun openAppIsResolvedAgainstEnvironmentAppsAndPerformed() {
+        val apps = listOf(AppEntry("时钟", "com.oplus.alarmclock/.AlarmClock"))
+        val (o, env, sent) = harness(
+            toolReply("要去时钟", "open_app" to """{"name":"时钟"}"""),
+            toolReply("时钟已打开", "finish" to """{"summary":"done"}"""),
+            env = FakeEnv({ listOf(node(7, "x")) }, apps = apps),
+        )
+        assertTrue(o.finished)
+        assertEquals(listOf<Action>(Action.OpenApp("时钟", "com.oplus.alarmclock/.AlarmClock")), env.performed)
+        assertEquals("App 列表在任务开始时从 Environment 取一次并记进 Transcript", apps, o.transcript.apps)
+        assertTrue("第一次请求的系统提示里就要有 App 列表", sent[0].contains("时钟"))
     }
 
     @Test

@@ -27,6 +27,13 @@ sealed class Action {
             fun clamp(ms: Int): Int = ms.coerceIn(MIN_MS, MAX_MS)
         }
     }
+    /**
+     * 在虚拟屏上启动一个 App。[label] 是模型点名用的显示名（只用于日志），[component] 是
+     * `包名/Activity`，由 [com.androiduse.agent.AppCatalog] 从 PackageManager 查出的白名单里解析，
+     * 模型给的文字不会直接出现在这里。
+     */
+    data class OpenApp(val label: String, val component: String) : Action()
+
     /** 任务完成。summary 是模型对结果的自述，用于日志与验收。 */
     data class Finish(val summary: String) : Action()
 }

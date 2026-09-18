@@ -15,6 +15,12 @@ interface Environment {
 
     /** 执行动作，返回注入是否成功。 */
     fun perform(action: Action): Boolean
+
+    /**
+     * 桌面可启动的 App（显示名 + 启动组件），供 open_app 按名字解析。任务开始时取一次，
+     * 记进 Transcript 后整个任务不变。查不到（无 Context 等）返回空列表，open_app 即不可用。
+     */
+    fun installedApps(): List<AppEntry>
 }
 
 /** Transcript 的落盘/旁路观察者。默认实现全是空操作，方便测试和 CLI 按需实现。 */

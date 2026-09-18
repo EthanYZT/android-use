@@ -53,4 +53,21 @@ class ActionCommandTest {
     fun finishProducesNoShellCommand() {
         assertNull(ActionCommand.toShell(Action.Finish("已打开显示与亮度"), screen))
     }
+
+    @Test
+    fun openAppLaunchesComponentOnTargetDisplayAsNewMultipleTask() {
+        // spec 1b 第 6 点：singleton Activity 会复用物理屏上的旧实例、忽略 --display，
+        // 必须 NEW_TASK|MULTIPLE_TASK (0x18000000) 强制新实例落到虚拟屏。
+        // 走 argv 而不是拼字符串：组件名虽由 PackageManager 给出，仍不进 shell 二次解析。
+        assertEquals(
+            listOf("am", "start", "--display", "3", "-n", "com.oplus.alarmclock/.AlarmClock", "-f", "0x18000000"),
+            ActionCommand.openAppArgv(Action.OpenApp("时钟", "com.oplus.alarmclock/.AlarmClock"), screen),
+        )
+    }
+
+    @Test
+    fun openAppProducesNoPlainShellString() {
+        // OpenApp 只有 argv 形态；Injector 必须在走 toShell 之前单独处理它。
+        assertNull(ActionCommand.toShell(Action.OpenApp("时钟", "com.oplus.alarmclock/.AlarmClock"), screen))
+    }
 }

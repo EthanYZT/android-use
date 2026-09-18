@@ -70,4 +70,33 @@ class ToolCallResolverTest {
         assertTrue(ToolCallResolver.resolve(ToolCall("c", "home", "{}"), nodes, w, h) is ToolCallResolver.Resolution.Err)
         assertTrue(ToolCallResolver.resolve(ToolCall("c", "teleport", "{}"), nodes, w, h) is ToolCallResolver.Resolution.Err)
     }
+
+    private val apps = listOf(
+        AppEntry("时钟", "com.oplus.alarmclock/.AlarmClock"),
+        AppEntry("日历", "com.coloros.calendar/.Main"),
+    )
+
+    @Test
+    fun openAppResolvesLabelToComponent() {
+        val r = ToolCallResolver.resolve(ToolCall("c", "open_app", """{"name":"时钟"}"""), nodes, w, h, apps)
+        assertEquals(Action.OpenApp("时钟", "com.oplus.alarmclock/.AlarmClock"), ok(r))
+    }
+
+    @Test
+    fun openAppUnknownNameIsErrorListingAvailableApps() {
+        // 错误要回给模型，并附上可选列表，让它下一轮改名字而不是继续猜。
+        val r = ToolCallResolver.resolve(ToolCall("c", "open_app", """{"name":"微信"}"""), nodes, w, h, apps)
+        val m = err(r)
+        assertTrue(m, m.contains("微信") && m.contains("时钟") && m.contains("日历"))
+    }
+
+    @Test
+    fun openAppWithoutNameIsError() {
+        assertTrue(ToolCallResolver.resolve(ToolCall("c", "open_app", "{}"), nodes, w, h, apps) is ToolCallResolver.Resolution.Err)
+    }
+
+    @Test
+    fun openAppWithEmptyCatalogIsError() {
+        assertTrue(ToolCallResolver.resolve(ToolCall("c", "open_app", """{"name":"时钟"}"""), nodes, w, h, emptyList()) is ToolCallResolver.Resolution.Err)
+    }
 }

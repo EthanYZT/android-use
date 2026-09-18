@@ -125,3 +125,37 @@ bounds→归一化中心 / 提示词列表经 `UntrustedText` / 按 id 解析成
 
 **阶段 1 剩余**：1d（OCR 兜底，ML Kit 打包）、1e（真 headless 屏 ADD_TRUSTED_DISPLAY）。
 DESIGN §9 阶段 1 验收（5 个系统 App 命中率 >90%）目前只在设置 1 个 App 上验过，待铺开。
+
+## 6. open_app 动作（2026-09-18 真机 E2E 通过）
+
+**动机**：1c 之后发现模型没有"打开 App"的动作，跨 App 任务只能 back/swipe 瞎试，退光后空虚拟屏
+镜像物理屏（隐私泄漏 + 推理暴涨）。铺开 5 App 验收前必须先补这一刀。
+
+**方案 A（已选）：按显示名点 App，列表由我们给。** 任务开始时 `Environment.installedApps()` 用
+PackageManager 查 MAIN+LAUNCHER 的 App（显示名 + `包名/Activity`），记进 `Transcript.apps`，
+`PromptBuilder.systemPrompt(apps)` 在系统提示末尾列出名字（顿号一行，经 `UntrustedText.sanitize`）。
+模型调用 `open_app(name)`，`AppCatalog.resolve` 解析：忽略大小写/首尾空白精确匹配 → 唯一子串匹配 →
+多义/未知返回错误并附可用列表让模型改。列表即白名单，模型不用猜 `com.oplus.*` 包名。
+否决 B（模型直接给包名，OnePlus 定制包名靠猜、无白名单）与 C（写死 5 个，验收一过就重做）。
+
+**执行**：`Action.OpenApp(label, component)` → `ActionCommand.openAppArgv` →
+`am start --display <id> -n <component> -f 0x18000000`，走 `RootShell.execArgv`（组件名不进 shell
+二次解析）。`0x18000000` = NEW_TASK|MULTIPLE_TASK（§4 要点 6），否则 singleton Activity 复用物理屏
+旧实例、忽略 `--display`。启动后 settle 1.5s（普通注入 0.6s）让下一步截图不是启动页。
+`toShell(OpenApp)` 返回 null，Injector 在走 toShell 之前单独处理，不破坏 F-6「null 即失败」契约。
+系统提示加规则：要去别的 App 直接 open_app，**不要**用 back 退出去找桌面（这块屏上没有桌面）。
+
+**接线**：`AndroidEnvironment(screen, pm)`；App 里传 `packageManager`（Manifest 加 `<queries>`
+MAIN/LAUNCHER，Android 11+ 包可见性）；`AgentCli` 在裸 app_process 里用
+`ActivityThread.systemMain().getSystemContext().packageManager`（需先 `Looper.prepareMainLooper()`），
+真机可用，桌面 App 约 100 个。失败只关掉 open_app（列表为空 → 解析报"不可用"），不影响其余循环。
+
+**E2E**：「打开时钟App」3 步完成（open_app → 同意隐私页 → finish）；「打开日历，告诉我今天几号，
+再打开计算器」6 步完成（两次 open_app 都一次命中，中途自己关了两个引导弹窗并读出日期）。
+单测 162 绿（新增 AppCatalogTest 9 个及 ActionCommand/ToolCallResolver/PromptBuilder/AgentLoop 各 2-4 个）。
+
+**观察到的 1e 遗留问题（本次不处理）**：任务结束 `VirtualDisplayManager.destroy()` 销屏后，虚拟屏上
+起的所有任务（时钟/日历/计算器）被系统**重挂到 display 0**，计算器直接成了物理屏前台
+（`dumpsys activity` 见 Display #0 topResumedActivity=计算器）。之前只有设置一个 App 时同样发生，
+open_app 让它更显眼。归 1e「销屏重挂 Activity」：销屏前 `am task remove` 掉虚拟屏上的任务，或真
+headless 屏。**5 App 验收铺开时每跑完一轮要留意物理屏被顶上来的 App。**

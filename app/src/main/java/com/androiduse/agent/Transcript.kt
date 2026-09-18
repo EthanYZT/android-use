@@ -17,6 +17,8 @@ data class Transcript(
     val startedAtMs: Long,
     val screenW: Int,
     val screenH: Int,
+    /** 任务开始时查到的可启动 App 列表；系统提示里的 open_app 白名单由它投影而来。 */
+    val apps: List<AppEntry> = emptyList(),
     val steps: MutableList<Step> = mutableListOf(),
 )
 

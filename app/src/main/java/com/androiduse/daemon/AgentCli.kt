@@ -8,6 +8,9 @@ import com.androiduse.display.VirtualDisplayManager
 import com.androiduse.log.TranscriptStore
 import com.androiduse.perception.ScreenCapture
 import com.androiduse.root.DaemonClient
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Looper
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -25,6 +28,10 @@ object AgentCli {
         val apkPath = args[0]
         val maxSteps = args[1].toIntOrNull() ?: 6
         val task = args.drop(2).joinToString(" ")
+        // ActivityThread 构造需要当前线程有 Looper（与 Daemon 的要点 1 同源）。
+        if (Looper.myLooper() == null) Looper.prepareMainLooper()
+        val pm = systemPackageManager()
+        println("packageManager=${if (pm == null) "不可用(open_app 关闭)" else "ok"}")
 
         DaemonClient.apkPath = apkPath
         ScreenCapture.cacheDir = File("/data/local/tmp") // CLI 以 root 跑，可读写
@@ -39,7 +46,7 @@ object AgentCli {
         val store = TranscriptStore(File("/data/local/tmp/androiduse_transcripts"))
         try {
             val outcome = runBlocking {
-                AgentLoop(client, AndroidEnvironment(screen), BuildConfig.ARK_MODEL_ID, store)
+                AgentLoop(client, AndroidEnvironment(screen, pm), BuildConfig.ARK_MODEL_ID, store)
                     .run(task, maxSteps = maxSteps) { println(it) }
             }
             println("RESULT: finished=${outcome.finished} ${outcome.summary}")
@@ -48,5 +55,20 @@ object AgentCli {
             VirtualDisplayManager.destroy()
         }
         System.exit(0)
+    }
+
+    /**
+     * 裸 app_process 里没有应用 Context，用 `ActivityThread.systemMain().getSystemContext()` 拿
+     * 系统 Context 的 PackageManager 来查桌面 App 列表。hidden API，与守护进程的
+     * UiAutomationFactory 同一类做法；失败只关掉 open_app，不影响其余循环。
+     */
+    private fun systemPackageManager(): PackageManager? = try {
+        val at = Class.forName("android.app.ActivityThread")
+        val thread = at.getMethod("systemMain").invoke(null)
+        val ctx = at.getMethod("getSystemContext").invoke(thread) as Context
+        ctx.packageManager
+    } catch (e: Throwable) {
+        println("systemMain 取 PackageManager 失败: $e")
+        null
     }
 }

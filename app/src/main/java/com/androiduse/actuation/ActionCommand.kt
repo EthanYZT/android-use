@@ -44,6 +44,19 @@ object ActionCommand {
                 null
             is Action.Wait -> null
             is Action.Finish -> null
+            // OpenApp 只有 argv 形态（见 openAppArgv）；Injector 在走 toShell 之前单独处理它。
+            is Action.OpenApp -> null
         }
     }
+
+    /**
+     * `am start --display <id> -n <component> -f 0x18000000`，以 argv 形态给 RootShell.execArgv。
+     *
+     * 0x18000000 = FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_MULTIPLE_TASK（spec 1b 第 6 点）：
+     * singleton/singleTask 的 Activity 若已在物理屏上有实例，`am start --display` 会复用旧实例
+     * 而忽略目标屏；MULTIPLE_TASK 强制起新任务落到虚拟屏，物理屏上的实例不受影响。
+     * 组件名虽由 PackageManager 给出，仍走 argv 不拼字符串，不给 shell 二次解析的机会。
+     */
+    fun openAppArgv(action: Action.OpenApp, screen: VirtualScreen): List<String> =
+        listOf("am", "start", "--display", screen.logicalDisplayId.toString(), "-n", action.component, "-f", "0x18000000")
 }

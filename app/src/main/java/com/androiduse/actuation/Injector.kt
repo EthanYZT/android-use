@@ -14,8 +14,17 @@ object Injector {
 
     private const val BASE_SETTLE_MS = 600L
 
+    /** 起 App 比点一下慢得多：冷启动 + 首帧渲染，等久一点下一步截图才不是空白/启动页。 */
+    private const val OPEN_APP_SETTLE_MS = 1500L
+
     fun perform(action: Action, screen: VirtualScreen): Boolean {
         if (action is Action.Finish) return true
+        if (action is Action.OpenApp) {
+            // am start 找不到组件或被系统拒绝时退出码非 0，ok=false 会作为"注入失败"反馈给模型。
+            val ok = RootShell.execArgv(ActionCommand.openAppArgv(action, screen)).ok
+            if (ok) Thread.sleep(jitter(OPEN_APP_SETTLE_MS))
+            return ok
+        }
         if (action is Action.Wait) {
             // F-1：再夹一次，防止未来出现不经 ResponseParser 构造 Action.Wait 的调用方
             // 重新把未夹紧的值捅到这里——解析边界已经夹过一次（ResponseParser），这里是

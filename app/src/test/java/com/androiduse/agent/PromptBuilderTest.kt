@@ -159,6 +159,37 @@ class PromptBuilderTest {
         assertFalse(p.contains("\"action\":\"home\""))
     }
 
+    private val apps = listOf(AppEntry("时钟", "com.oplus.alarmclock/.AlarmClock"), AppEntry("日历", "com.coloros.calendar/.Main"))
+
+    @Test
+    fun toolsDeclareOpenAppTakingAName() {
+        val tools = PromptBuilder.toolsJson()
+        assertTrue(tools.contains("\"name\":\"open_app\""))
+        assertTrue("open_app 的参数是显示名 name", tools.contains("\"name\":{\"type\":\"string\""))
+    }
+
+    @Test
+    fun systemPromptListsOpenableAppsAndTellsModelToUseOpenAppInsteadOfBackingOut() {
+        val p = PromptBuilder.systemPrompt(apps)
+        assertTrue(p, p.contains("时钟、日历"))
+        assertTrue(p, p.contains("open_app"))
+        assertTrue("要明确禁止靠 back 退出去找桌面", p.contains("back"))
+    }
+
+    @Test
+    fun systemPromptWithoutAppsOmitsTheList() {
+        val p = PromptBuilder.systemPrompt(emptyList())
+        assertFalse(p.contains("时钟"))
+    }
+
+    @Test
+    fun requestBodyCarriesTranscriptAppsIntoSystemPrompt() {
+        val t = Transcript("t", "打开时钟", "glm", 0L, 1080, 2376, apps = apps)
+        t.steps.add(Step(1, obs(1)))
+        val body = PromptBuilder.buildRequestBody(t)
+        assertTrue(body.contains("时钟、日历"))
+    }
+
     @Test
     fun jsonStringEscapesQuotesBackslashesNewlinesAndControlChars() {
         assertEquals("\"a\\\"b\"", PromptBuilder.jsonString("a\"b"))
