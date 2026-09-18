@@ -18,6 +18,9 @@
     <string name="result_stopped">已停止</string>
     <string name="result_finished">✓ 任务完成</string>
     <string name="result_unfinished">✗ 未完成</string>
+    <string name="action_takeover">在手机上继续</string>
+    <string name="status_taking_over">正在切换到手机屏幕…</string>
+    <string name="result_handoff">⇥ 已交接</string>
 
     <!-- Outcomes -->
     <string name="outcome_success">任务完成</string>

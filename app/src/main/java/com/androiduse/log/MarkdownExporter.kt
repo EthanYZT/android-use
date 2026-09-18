@@ -24,7 +24,7 @@ object MarkdownExporter {
         if (o == null) {
             append("- 结果：**未结束**（日志没有结束行，任务可能中途崩溃或被杀）\n")
         } else {
-            append("- 结果：").append(if (o.finished) "**完成**" else "**中止**")
+            append("- 结果：").append(when { o.handoff -> "**已交接**"; o.finished -> "**完成**"; else -> "**中止**" })
                 .append("，").append(fmt.format(Date(o.endedAtMs))).append('\n')
             append("\n> ").append(o.summary.replace("\n", "\n> ")).append('\n')
         }

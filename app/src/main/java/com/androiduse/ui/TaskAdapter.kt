@@ -36,6 +36,7 @@ class TaskAdapter(private val onClick: (StoredTranscript) -> Unit) : RecyclerVie
         val o = t.outcome
         b.tvOutcome.text = when {
             o == null -> "… 未结束"
+            o.handoff -> "⇥ 已交接：${o.summary}"
             o.finished -> "✓ ${o.summary}"
             else -> "✗ ${o.summary}"
         }

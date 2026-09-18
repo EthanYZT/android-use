@@ -58,4 +58,13 @@ class MarkdownExporterTest {
         val md = MarkdownExporter.render(stored().copy(outcome = null))
         assertTrue(md, md.contains("未结束"))
     }
+
+    private fun transcriptWithOutcome(outcome: StoredOutcome) = stored().copy(outcome = outcome)
+
+    @Test
+    fun handoffOutcomeIsLabelledAsHandoff() {
+        val md = MarkdownExporter.render(transcriptWithOutcome(StoredOutcome(false, "停在结算页", 1L, handoff = true)))
+        assertTrue(md, md.contains("**已交接**"))
+        assertTrue(md, md.contains("停在结算页"))
+    }
 }

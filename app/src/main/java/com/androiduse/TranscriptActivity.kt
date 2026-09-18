@@ -58,6 +58,7 @@ class TranscriptActivity : AppCompatActivity() {
             val o = t.outcome
             binding.tvOutcome.text = when {
                 o == null -> getString(R.string.outcome_unfinished)
+                o.handoff -> "⇥ 已交接：${o.summary}"
                 o.finished -> "✓ ${o.summary}"
                 else -> "✗ ${o.summary}"
             }

@@ -148,5 +148,16 @@
             android:textAppearance="@style/TextAppearance.AndroidUse.Body"
             android:textColor="?attr/colorOnPrimaryContainer"
             android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTakeover"
+            style="@style/Widget.AndroidUse.Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:text="@string/action_takeover"
+            android:visibility="gone" />
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

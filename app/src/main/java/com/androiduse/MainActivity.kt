@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         binding.rvSteps.adapter = adapter
         binding.btnRun.setOnClickListener { startTask() }
         binding.btnStop.setOnClickListener { job?.cancel() }
+        binding.btnTakeover.setOnClickListener { takeover() }
         handleTaskExtra(intent)
     }
 
@@ -98,12 +100,13 @@ class MainActivity : AppCompatActivity() {
             setRunning(true)
             adapter.submit(emptyList())
             binding.tvResult.visibility = View.GONE
+            binding.btnTakeover.visibility = View.GONE
             try {
                 binding.toolbar.subtitle = getString(R.string.status_preparing_screen)
                 val screen = withContext(Dispatchers.IO) { ScreenSession.ensure() }
                 updateScreenStatus()
                 if (screen == null) {
-                    showResult(false, getString(R.string.error_screen_create_failed))
+                    showError(getString(R.string.error_screen_create_failed))
                     return@launch
                 }
 
@@ -129,9 +132,9 @@ class MainActivity : AppCompatActivity() {
                         Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
                         runOnUiThread { binding.toolbar.subtitle = line.take(90) }
                     }
-                showResult(outcome.finished, outcome.summary)
+                showResult(outcome)
             } catch (e: CancellationException) {
-                showResult(false, getString(R.string.result_stopped))
+                showResult(null)
             } finally {
                 setRunning(false)
             }
@@ -146,9 +149,43 @@ class MainActivity : AppCompatActivity() {
         if (!running) binding.toolbar.subtitle = null
     }
 
-    private fun showResult(finished: Boolean, summary: String) {
-        binding.tvResult.text = (if (finished) getString(R.string.result_finished) else getString(R.string.result_unfinished)) + "\n" + summary
+    /** 建虚拟屏失败等无法继续的错误：只显示文本，不出"在手机上继续"按钮（没有虚拟屏可接管）。 */
+    private fun showError(text: String) {
+        binding.tvResult.text = text
         binding.tvResult.visibility = View.VISIBLE
+    }
+
+    private fun showResult(outcome: AgentLoop.Outcome?) {
+        val label = when {
+            outcome == null -> getString(R.string.result_stopped)
+            outcome.handoff -> getString(R.string.result_handoff) + "：" + outcome.summary
+            outcome.finished -> getString(R.string.result_finished) + "\n" + outcome.summary
+            else -> getString(R.string.result_unfinished) + "\n" + outcome.summary
+        }
+        binding.tvResult.text = label
+        binding.tvResult.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val show = withContext(Dispatchers.IO) { ScreenHandover.hasTakeoverTarget() }
+            binding.btnTakeover.visibility = if (show) View.VISIBLE else View.GONE
+            binding.btnTakeover.isEnabled = true
+        }
+    }
+
+    private fun takeover() {
+        binding.btnTakeover.isEnabled = false
+        binding.toolbar.subtitle = getString(R.string.status_taking_over)
+        lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) { ScreenHandover.takeover() }
+            binding.toolbar.subtitle = null
+            updateScreenStatus()
+            r.onSuccess {
+                binding.btnTakeover.visibility = View.GONE
+                moveTaskToBack(true)
+            }.onFailure { e ->
+                binding.btnTakeover.isEnabled = true
+                Toast.makeText(this@MainActivity, e.message ?: "切换失败", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun updateScreenStatus() {
