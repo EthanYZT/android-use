@@ -64,6 +64,11 @@ class AgentLoopTest {
         var outcomeHandoff: Boolean? = null
         override fun start(t: Transcript) { started = t }
         override fun step(t: Transcript, step: Step) { steps.add(step.index) }
+        val savedNodes = mutableListOf<Pair<Int, List<NodeRecord>>>()
+        var savedOcrLines: List<OcrLine>? = null
+        override fun saveNodes(t: Transcript, stepIndex: Int, nodes: List<NodeRecord>, ocrLines: List<OcrLine>?): String? {
+            savedNodes += stepIndex to nodes; savedOcrLines = ocrLines; return "/dev/null/step-$stepIndex.nodes.json"
+        }
         override fun outcome(t: Transcript, finished: Boolean, summary: String, handoff: Boolean) { outcomeHandoff = handoff }
     }
 
@@ -227,6 +232,24 @@ class AgentLoopTest {
         assertFalse(ex[1].ok); assertTrue(ex[1].result, ex[1].result.contains("99"))
         assertFalse(ex[2].ok); assertTrue(ex[2].result, ex[2].result.contains("未执行"))
         assertTrue("未执行也要作为 tool 结果回给模型", sent[1].contains("未执行"))
+    }
+
+
+    @Test
+    fun everyStepHandsTheFullNodeListToTheSinkBeforeTheModelSeesIt() {
+        // 元素列表在提示词里是筛选过的（NodeGrounding.selectForPrompt）；sink 拿到的必须是整棵树，逐步都有。
+        val many = (0 until 120).map { NodeRecord(it, 0, it * 10, 1000, it * 10 + 9, "row$it", "", "", "", true, false) }
+        val sink = FakeSink()
+        val (o, _, _) = harness(
+            toolReply("看到", "tap" to """{"id":7}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            env = FakeEnv({ many }),
+            sink = sink,
+        )
+        assertTrue(o.finished)
+        assertEquals(listOf(1, 2), sink.savedNodes.map { it.first })
+        assertEquals(120, sink.savedNodes[0].second.size)
+        assertEquals(many, sink.savedNodes[1].second)
     }
 
     @Test

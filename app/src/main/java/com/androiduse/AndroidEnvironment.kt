@@ -52,12 +52,13 @@ class AndroidEnvironment(
         // 1d ②级：全帧 OCR 只补节点树的洞。失败/超时/空屏 → 纯节点列表，不影响本步。
         var merged = nodes
         var ocrError: String? = null
+        var ocrLines: List<com.androiduse.agent.OcrLine>? = null
         val bmp = frame?.fullBitmap
         if (textReader != null && bmp != null) {
             val t0 = System.currentTimeMillis()
             val lines = textReader.read(bmp)
             if (lines == null) ocrError = "识别失败或超时"
-            else merged = OcrMerge.merge(nodes, lines, screenW, screenH)
+            else { ocrLines = lines; merged = OcrMerge.merge(nodes, lines, screenW, screenH) }
             Log.i(TAG, "ocr ${System.currentTimeMillis() - t0}ms lines=${lines?.size ?: -1} added=${merged.size - nodes.size}")
         }
         bmp?.recycle()
@@ -69,6 +70,7 @@ class AndroidEnvironment(
             dumpError = dumpError,
             ocrCount = merged.size - nodes.size,
             ocrError = ocrError,
+            ocrLines = ocrLines,
         )
     }
 

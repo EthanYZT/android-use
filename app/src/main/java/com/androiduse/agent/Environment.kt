@@ -47,6 +47,9 @@ interface TranscriptSink {
     /** 保存一张截图，返回可写进日志的路径；不落盘返回 null。 */
     fun saveScreenshot(t: Transcript, stepIndex: Int, jpegBase64: String): String? = null
 
+    /** 保存该步的全量节点树与 OCR 原始行（提示词里的列表是筛选过的），返回文件路径；不落盘返回 null。 */
+    fun saveNodes(t: Transcript, stepIndex: Int, nodes: List<com.androiduse.daemon.DumpCodec.NodeRecord>, ocrLines: List<OcrLine>?): String? = null
+
     /** 一步结束（execution 已填）时调用。 */
     fun step(t: Transcript, step: Step) {}
 

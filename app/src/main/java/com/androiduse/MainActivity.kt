@@ -114,6 +114,8 @@ class MainActivity : AppCompatActivity() {
                     override fun start(t: Transcript) = store.start(t)
                     override fun saveScreenshot(t: Transcript, stepIndex: Int, jpegBase64: String) =
                         store.saveScreenshot(t, stepIndex, jpegBase64)
+                    override fun saveNodes(t: Transcript, stepIndex: Int, nodes: List<com.androiduse.daemon.DumpCodec.NodeRecord>, ocrLines: List<com.androiduse.agent.OcrLine>?) =
+                        store.saveNodes(t, stepIndex, nodes, ocrLines)
                     override fun step(t: Transcript, step: Step) {
                         store.step(t, step)
                         val stored = step.toStored()

@@ -76,6 +76,7 @@ class AgentLoop(
 
             val raw = env.observe(i)
             val path = raw.screenshotBase64?.let { sink.saveScreenshot(t, i, it) }
+            sink.saveNodes(t, i, raw.nodes, raw.ocrLines) // 全量树 + OCR 原始行，提示词里的列表是筛选过的
             val obs = raw.copy(screenshotPath = path)
             val step = Step(i, obs)
             t.steps += step

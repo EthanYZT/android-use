@@ -178,7 +178,7 @@ object DumpCodec {
             .mapNotNull { it.trim().toIntOrNull() }
     }
 
-    private fun encodeNode(n: NodeRecord): String = buildString {
+    internal fun encodeNode(n: NodeRecord): String = buildString {
         append("{\"id\":").append(n.id)
         append(",\"b\":[").append(n.left).append(',').append(n.top).append(',')
             .append(n.right).append(',').append(n.bottom).append(']')

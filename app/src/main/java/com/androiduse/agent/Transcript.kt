@@ -49,6 +49,8 @@ data class Observation(
     /** 1d：OCR 补进 nodes 的条目数（进度行显示 `ocr+N`）；OCR 失败时 ocrError 非空。 */
     val ocrCount: Int = 0,
     val ocrError: String? = null,
+    /** OCR 的原始行（合并前）；OCR 没跑/失败为 null。只为落盘归因，不进提示词。 */
+    val ocrLines: List<OcrLine>? = null,
 )
 
 /** 模型一次回复：content 是它的观察笔记，tool_calls 是动作。 */
@@ -150,6 +152,25 @@ object TranscriptCodec {
         if (s.executions.isNotEmpty()) {
             append(",\"executions\":[")
             s.executions.forEachIndexed { i, e -> if (i > 0) append(','); append(encodeExecution(e)) }
+            append(']')
+        }
+        append('}')
+    }
+
+    /**
+     * 每步的全量节点树 + OCR 原始行 → `step-N.nodes.json`（单独成文件，不进 transcript.jsonl：
+     * 密页面一步几百个节点，塞进主日志会让它没法随手导出）。节点编码复用守护进程线协议的 encodeNode。
+     */
+    fun encodeNodesFile(nodes: List<com.androiduse.daemon.DumpCodec.NodeRecord>, ocrLines: List<OcrLine>?): String = buildString {
+        append("{\"nodes\":[")
+        nodes.forEachIndexed { i, n -> if (i > 0) append(','); append(com.androiduse.daemon.DumpCodec.encodeNode(n)) }
+        append("],\"ocr\":")
+        if (ocrLines == null) append("null") else {
+            append('[')
+            ocrLines.forEachIndexed { i, l ->
+                if (i > 0) append(',')
+                append("{\"text\":").append(js(l.text)).append(",\"b\":[").append(l.left).append(',').append(l.top).append(',').append(l.right).append(',').append(l.bottom).append("]}")
+            }
             append(']')
         }
         append('}')

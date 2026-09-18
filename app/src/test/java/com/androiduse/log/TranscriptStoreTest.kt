@@ -1,6 +1,8 @@
 package com.androiduse.log
 
 import com.androiduse.agent.Observation
+import com.androiduse.agent.OcrLine
+import com.androiduse.daemon.DumpCodec.NodeRecord
 import com.androiduse.agent.Step
 import com.androiduse.agent.Transcript
 import org.junit.Assert.assertEquals
@@ -39,6 +41,32 @@ class TranscriptStoreTest {
         assertEquals(5, shot.length())
         assertEquals(shot.absolutePath, path)
         assertTrue(lines[1].contains("step-1.jpg"))
+    }
+
+
+    @Test
+    fun saveNodesWritesTheFullNodeListAndRawOcrLinesPerStep() {
+        // 提示词里的元素列表是截断/筛选过的；事后归因要看整棵树和 OCR 原始行，所以每步单独落一个文件。
+        val root = Files.createTempDirectory("aud").toFile()
+        val store = TranscriptStore(root)
+        val t = Transcript("task-1", "点单", "glm", 0L, 1080, 2376)
+        store.start(t)
+        val nodes = listOf(
+            NodeRecord(577, 700, 1980, 1000, 2060, "加入购物车", "", "com.m:id/add", "android.widget.Button", true, false),
+            NodeRecord(5, 0, 100, 1080, 200, "", "收件人", "", "android.widget.EditText", true, false, editable = true),
+        )
+        val ocr = listOf(OcrLine("选规格", 800, 500, 990, 560))
+        val path = store.saveNodes(t, 3, nodes, ocr)!!
+        val f = File(root, "task-1/step-3.nodes.json")
+        assertEquals(f.absolutePath, path)
+        val text = f.readText()
+        assertTrue(text, text.contains("\"id\":577") && text.contains("\"text\":\"加入购物车\"") && text.contains("\"edit\":true"))
+        assertTrue(text, text.contains("\"ocr\":[{\"text\":\"选规格\",\"b\":[800,500,990,560]}]"))
+        assertTrue(text, text.startsWith("{\"nodes\":["))
+
+        // OCR 没跑（AgentCli / 识别失败）时 ocr 字段为 null，节点照存。
+        val noOcr = File(store.saveNodes(t, 4, nodes.take(1), null)!!).readText()
+        assertTrue(noOcr, noOcr.contains("\"ocr\":null") && noOcr.contains("\"id\":577"))
     }
 
     @Test
