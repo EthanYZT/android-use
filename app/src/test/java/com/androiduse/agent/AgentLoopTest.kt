@@ -61,8 +61,10 @@ class AgentLoopTest {
     private class FakeSink : TranscriptSink {
         var started: Transcript? = null
         val steps = mutableListOf<Int>()
+        var outcomeHandoff: Boolean? = null
         override fun start(t: Transcript) { started = t }
         override fun step(t: Transcript, step: Step) { steps.add(step.index) }
+        override fun outcome(t: Transcript, finished: Boolean, summary: String, handoff: Boolean) { outcomeHandoff = handoff }
     }
 
     private fun harness(
@@ -235,6 +237,39 @@ class AgentLoopTest {
         assertEquals("done", o.summary)
         assertEquals(listOf<Action>(Action.Tap(500, 375)), env.performed)
         assertEquals(3, o.transcript.steps[0].executions.size)
+    }
+
+    @Test
+    fun handoffEndsTheLoopWithHandoffKindAndReasonAsSummary() {
+        val (o, env, _) = harness(
+            toolReply("到结算页了", "tap" to """{"id":7}"""),
+            toolReply("要付款了", "handoff" to """{"reason":"停在结算页，需要你付款"}"""),
+        )
+        assertFalse(o.finished)
+        assertEquals(AgentLoop.Kind.HANDOFF, o.kind)
+        assertTrue(o.handoff)
+        assertEquals("停在结算页，需要你付款", o.summary)
+        assertEquals(2, o.transcript.steps.size)
+        assertEquals("handoff", o.transcript.steps[1].execution!!.result)
+    }
+
+    @Test
+    fun callsAfterHandoffInTheSameStepAreNotExecuted() {
+        val (o, env, _) = harness(
+            toolReply("交接后还想点", "handoff" to """{"reason":"验证码"}""", "tap" to """{"id":7}"""),
+        )
+        assertEquals(AgentLoop.Kind.HANDOFF, o.kind)
+        assertTrue(env.performed.isEmpty())
+        assertEquals(AgentLoop.NOT_EXECUTED_AFTER_HANDOFF, o.transcript.steps[0].executions[1].result)
+    }
+
+    @Test
+    fun finishedAndAbortedOutcomesCarryTheirKind() {
+        val (fin, _, _) = harness(toolReply("完成", "finish" to """{"summary":"done"}"""))
+        assertEquals(AgentLoop.Kind.FINISHED, fin.kind)
+        val (ab, _, _) = harness(textReply("没有工具"), textReply("还是没有"))
+        assertEquals(AgentLoop.Kind.ABORTED, ab.kind)
+        assertFalse(ab.handoff)
     }
 
     @Test

@@ -48,7 +48,7 @@ object AgentCli {
                 AgentLoop(client, AndroidEnvironment(screen, ctx, providersAvailable = false), BuildConfig.ARK_MODEL_ID, store)
                     .run(task, maxSteps = maxSteps) { println(it) }
             }
-            println("RESULT: finished=${outcome.finished} ${outcome.summary}")
+            println("RESULT: finished=${outcome.finished} handoff=${outcome.handoff} ${outcome.summary}")
             println("TRANSCRIPT: /data/local/tmp/androiduse_transcripts/${outcome.transcript.taskId}/transcript.jsonl")
         } finally {
             session.destroy()

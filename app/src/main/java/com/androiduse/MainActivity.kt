@@ -120,8 +120,8 @@ class MainActivity : AppCompatActivity() {
                             binding.rvSteps.scrollToPosition(adapter.itemCount - 1)
                         }
                     }
-                    override fun outcome(t: Transcript, finished: Boolean, summary: String) =
-                        store.outcome(t, finished, summary)
+                    override fun outcome(t: Transcript, finished: Boolean, summary: String, handoff: Boolean) =
+                        store.outcome(t, finished, summary, handoff)
                 }
                 val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
                 val outcome = AgentLoop(client, AndroidEnvironment(screen, applicationContext, MlKitTextReader), BuildConfig.ARK_MODEL_ID, sink)

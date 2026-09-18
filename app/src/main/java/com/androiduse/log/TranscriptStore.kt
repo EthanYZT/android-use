@@ -36,8 +36,8 @@ class TranscriptStore(private val root: File) : TranscriptSink {
         file(t).appendText(TranscriptCodec.encodeStep(step) + "\n")
     }
 
-    override fun outcome(t: Transcript, finished: Boolean, summary: String) {
-        file(t).appendText(TranscriptCodec.encodeOutcome(finished, summary, System.currentTimeMillis()) + "\n")
+    override fun outcome(t: Transcript, finished: Boolean, summary: String, handoff: Boolean) {
+        file(t).appendText(TranscriptCodec.encodeOutcome(finished, summary, System.currentTimeMillis(), handoff) + "\n")
     }
 
     /** 所有任务，最新的在前。读不出来的目录跳过。 */

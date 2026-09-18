@@ -20,7 +20,13 @@ class AgentLoop(
     private val model: String,
     private val sink: TranscriptSink = object : TranscriptSink {},
 ) {
-    data class Outcome(val finished: Boolean, val summary: String, val transcript: Transcript)
+    /** 任务结束的方式：正常 finish、交接给人类、还是中止。 */
+    enum class Kind { FINISHED, HANDOFF, ABORTED }
+
+    data class Outcome(val finished: Boolean, val summary: String, val transcript: Transcript, val kind: Kind = if (finished) Kind.FINISHED else Kind.ABORTED) {
+        /** kind 的布尔投影，供不关心三态、只关心"是否交接了"的调用方用。 */
+        val handoff: Boolean get() = kind == Kind.HANDOFF
+    }
 
     companion object {
         /** 连续这么多步执行失败（解析失败或注入失败）就中止，避免死磕。 */
@@ -34,6 +40,7 @@ class AgentLoop(
 
         const val NOT_EXECUTED_AFTER_FAILURE = "未执行（前一个动作失败）"
         const val NOT_EXECUTED_AFTER_FINISH = "未执行（已 finish）"
+        const val NOT_EXECUTED_AFTER_HANDOFF = "未执行（已 handoff）"
         const val NOT_EXECUTED_OVER_CAP = "未执行（单步最多 $MAX_CALLS_PER_STEP 个动作）"
     }
 
@@ -43,7 +50,7 @@ class AgentLoop(
         onProgress: (String) -> Unit,
     ): Outcome = withContext(Dispatchers.IO) {
         val o = runSteps(task, maxSteps, onProgress)
-        sink.outcome(o.transcript, o.finished, o.summary)
+        sink.outcome(o.transcript, o.finished, o.summary, o.handoff)
         o
     }
 
@@ -103,6 +110,7 @@ class AgentLoop(
 
             // 一步多动作：按顺序执行，任一失败后其余标记未执行；finish 出现在中间则先执行它前面的再结束。
             var finish: Action.Finish? = null
+            var handoff: Action.Handoff? = null
             var stopped: String? = null
             var anyFailed = false
             var lastAction: Action? = null
@@ -128,6 +136,10 @@ class AgentLoop(
                                     finish = action
                                     Execution(action, true, "finish", System.currentTimeMillis() - c0)
                                 }
+                                is Action.Handoff -> {
+                                    handoff = action
+                                    Execution(action, true, "handoff", System.currentTimeMillis() - c0)
+                                }
                                 // 2a：系统接口不经注入；返回的 text（查询结果/成功文案/失败原因）就是 tool 消息。
                                 is Action.System -> {
                                     val r = env.performSystem(action.call)
@@ -149,6 +161,7 @@ class AgentLoop(
                 if (exec.ok) lastAction = exec.action
                 if (!exec.ok) { anyFailed = true; stopped = NOT_EXECUTED_AFTER_FAILURE }
                 else if (finish != null) stopped = NOT_EXECUTED_AFTER_FINISH
+                else if (handoff != null) stopped = NOT_EXECUTED_AFTER_HANDOFF
                 onProgress(line(i, exec.action?.toString() ?: call.name, exec.costMs, exec.result))
             }
             val summary = Execution(
@@ -162,6 +175,10 @@ class AgentLoop(
             if (finish != null && !anyFailed) {
                 onProgress(line(i, "Finish", summary.costMs, finish!!.summary))
                 return@withContext Outcome(true, finish!!.summary, t)
+            }
+            if (handoff != null && !anyFailed) {
+                onProgress(line(i, "Handoff", summary.costMs, handoff!!.reason))
+                return@withContext Outcome(false, handoff!!.reason, t, Kind.HANDOFF)
             }
             if (calls.size > 1) onProgress(line(i, "Step", summary.costMs, "$executedCount/${calls.size} 个动作已执行" + (if (anyFailed) "，中途失败" else "")))
 

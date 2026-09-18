@@ -123,6 +123,16 @@ class TranscriptReadbackTest {
     }
 
     @Test
+    fun outcomeHandoffFlagRoundTripsAndDefaultsToFalse() {
+        val withFlag = listOf(TranscriptCodec.encodeHeader(sample())) + TranscriptCodec.encodeOutcome(finished = false, summary = "停在结算页", endedAtMs = 1L, handoff = true)
+        assertTrue(TranscriptCodec.decode(withFlag)!!.outcome!!.handoff)
+        val legacy = listOf(TranscriptCodec.encodeHeader(sample())) + """{"type":"outcome","finished":true,"summary":"x","endedAtMs":1}"""
+        val o = TranscriptCodec.decode(legacy)!!.outcome!!
+        assertFalse(o.handoff)
+        assertTrue(o.finished)
+    }
+
+    @Test
     fun liveViewEqualsWhatIsReadBackFromDisk() {
         // 实时 UI 用 Step.toStored()，历史页用 decode()；两条路必须给出同一份视图。
         val t = sample()

@@ -117,8 +117,8 @@ fun Step.toStored(): StoredStep = StoredStep(
     executions = executions.map { StoredExecution(it.action?.toString(), it.ok, it.result, it.costMs) },
 )
 
-/** 任务结束时追加的一行：完成与否、结论、结束时间。 */
-data class StoredOutcome(val finished: Boolean, val summary: String, val endedAtMs: Long)
+/** 任务结束时追加的一行：完成与否、结论、结束时间、是否交接给了人类。 */
+data class StoredOutcome(val finished: Boolean, val summary: String, val endedAtMs: Long, val handoff: Boolean = false)
 
 /**
  * Transcript → JSONL。第一行是任务头，之后每步一行。手写编码（JVM 单测里 org.json 是桩）。
@@ -155,10 +155,11 @@ object TranscriptCodec {
         append('}')
     }
 
-    fun encodeOutcome(finished: Boolean, summary: String, endedAtMs: Long): String = buildString {
+    fun encodeOutcome(finished: Boolean, summary: String, endedAtMs: Long, handoff: Boolean = false): String = buildString {
         append('{')
         append("\"type\":\"outcome\"")
         append(",\"finished\":").append(finished)
+        append(",\"handoff\":").append(handoff)
         append(",\"summary\":").append(js(summary))
         append(",\"endedAtMs\":").append(endedAtMs)
         append('}')
@@ -181,6 +182,7 @@ object TranscriptCodec {
                     finished = m["finished"] as? Boolean ?: false,
                     summary = m["summary"] as? String ?: "",
                     endedAtMs = (m["endedAtMs"] as? Long) ?: 0L,
+                    handoff = m["handoff"] as? Boolean ?: false,
                 )
             }
         }

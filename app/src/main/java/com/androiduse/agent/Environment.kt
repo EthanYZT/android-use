@@ -50,8 +50,8 @@ interface TranscriptSink {
     /** 一步结束（execution 已填）时调用。 */
     fun step(t: Transcript, step: Step) {}
 
-    /** 任务结束（完成或中止）时调用一次。 */
-    fun outcome(t: Transcript, finished: Boolean, summary: String) {}
+    /** 任务结束（完成、交接给人类、或中止）时调用一次。 */
+    fun outcome(t: Transcript, finished: Boolean, summary: String, handoff: Boolean = false) {}
 }
 
 /** 系统接口调用的结果。ok=false 时 text 是给模型看的失败原因。 */
