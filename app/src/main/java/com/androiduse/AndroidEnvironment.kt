@@ -44,4 +44,7 @@ class AndroidEnvironment(
     override fun perform(action: Action): Boolean = Injector.perform(action, screen)
 
     override fun installedApps(): List<AppEntry> = pm?.let { LauncherApps.query(it) } ?: emptyList()
+
+    override fun refreshNodes(): List<DumpCodec.NodeRecord>? =
+        (DaemonClient.dump(screen.logicalDisplayId) as? DumpCodec.DumpResult.Ok)?.nodes
 }

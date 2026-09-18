@@ -191,6 +191,40 @@ class PromptBuilderTest {
     }
 
     @Test
+    fun onlyTheCurrentStepKeepsItsFullNodeList() {
+        // 验收发现：节点 id 按 dump 顺序分配，树一变整体位移；保留旧列表等于邀请模型沿用旧 id。
+        assertEquals(1, PromptBuilder.KEEP_NODES_STEPS)
+    }
+
+    @Test
+    fun systemPromptSaysIdsAreOnlyValidForTheCurrentList() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains("只对当前列表有效"))
+        assertTrue(p, p.contains("不要沿用"))
+    }
+
+    @Test
+    fun systemPromptAllowsSequentialMultiCallsAndNoLongerDemandsExactlyOne() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p, p.contains("顺序执行"))
+        assertFalse(p, p.contains("只调用一个"))
+    }
+
+    @Test
+    fun everyToolCallGetsItsOwnToolMessageFromExecutions() {
+        val t = transcript(0)
+        val s = t.steps[0]
+        s.replies.add(reply("连按两个键", ToolCall("call_a", "tap", """{"id":0}"""), ToolCall("call_b", "tap", """{"id":1}""")))
+        s.executions.add(Execution(Action.Tap(500, 46), true, "ok", 300))
+        s.executions.add(Execution(null, false, "未执行（前一个动作失败）", 0))
+        t.steps.add(Step(2, obs(2)))
+        val body = PromptBuilder.buildRequestBody(t)
+        val a = body.indexOf("\"role\":\"tool\",\"tool_call_id\":\"call_a\",\"content\":\"ok\"")
+        val b = body.indexOf("\"role\":\"tool\",\"tool_call_id\":\"call_b\",\"content\":\"未执行（前一个动作失败）\"")
+        assertTrue(body, a >= 0 && b > a)
+    }
+
+    @Test
     fun jsonStringEscapesQuotesBackslashesNewlinesAndControlChars() {
         assertEquals("\"a\\\"b\"", PromptBuilder.jsonString("a\"b"))
         assertEquals("\"a\\\\b\"", PromptBuilder.jsonString("a\\b"))

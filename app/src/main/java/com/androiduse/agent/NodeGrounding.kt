@@ -56,6 +56,28 @@ object NodeGrounding {
     }
 
     /**
+     * 一步多动作时，批内后续动作的重新定位：模型给的 [id] 指向**步初**列表 [original] 里的元素，
+     * 前一个动作之后界面可能已重排（id 整体位移、键位移动），于是在新 dump [fresh] 里按元素身份
+     * （resId + text + desc + className）找同一个元素，返回它**当前**中心的归一化 Tap。
+     * 多个同身份元素时取离原位置最近的；找不到或 id 不存在 → null（调用方判该动作失败并停止本批）。
+     */
+    fun relocate(id: Int, original: List<NodeRecord>, fresh: List<NodeRecord>, screenW: Int, screenH: Int): Action.Tap? {
+        val src = original.firstOrNull { it.id == id } ?: return null
+        val candidates = fresh.filter {
+            it.resId == src.resId && it.text == src.text && it.desc == src.desc && it.className == src.className &&
+                it.right > it.left && it.bottom > it.top
+        }
+        if (candidates.isEmpty()) return null
+        val sx = (src.left + src.right) / 2L; val sy = (src.top + src.bottom) / 2L
+        val best = candidates.minByOrNull { c ->
+            val cx = (c.left + c.right) / 2L; val cy = (c.top + c.bottom) / 2L
+            (cx - sx) * (cx - sx) + (cy - sy) * (cy - sy)
+        }!!
+        val c = centerNorm(best, screenW, screenH) ?: return null
+        return Action.Tap(c.first, c.second)
+    }
+
+    /**
      * 把模型选中的节点 id 解析成一个归一化 [Action.Tap]（点在该节点中心）。
      * id 不存在或 bounds 退化 → null。
      */

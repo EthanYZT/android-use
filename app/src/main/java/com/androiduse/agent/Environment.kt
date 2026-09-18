@@ -21,6 +21,13 @@ interface Environment {
      * 记进 Transcript 后整个任务不变。查不到（无 Context 等）返回空列表，open_app 即不可用。
      */
     fun installedApps(): List<AppEntry>
+
+    /**
+     * 只重新读一次节点树（不截图、不调模型），供一步多动作时批内后续动作重新定位：
+     * 前一个动作可能让界面重排（计算器切到科学布局），步初的 id/坐标就不再可靠。
+     * 不支持刷新的环境返回 null，调用方退回用步初的树。
+     */
+    fun refreshNodes(): List<com.androiduse.daemon.DumpCodec.NodeRecord>? = null
 }
 
 /** Transcript 的落盘/旁路观察者。默认实现全是空操作，方便测试和 CLI 按需实现。 */

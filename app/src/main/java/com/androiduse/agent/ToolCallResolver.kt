@@ -25,6 +25,8 @@ object ToolCallResolver {
         screenW: Int,
         screenH: Int,
         apps: List<AppEntry> = emptyList(),
+        /** 非 null 时（一步多动作的批内后续动作）：tap-by-id 在这棵新树里按身份重新定位。 */
+        freshNodes: List<NodeRecord>? = null,
     ): Resolution {
         val a = call.argumentsJson
         return when (call.name) {
@@ -32,6 +34,11 @@ object ToolCallResolver {
                 val id = ResponseParser.intField(a, "id")
                 if (id != null) {
                     if (nodes.none { it.id == id }) return Resolution.Err("id $id 不在当前元素列表里，请重新查看列表或改用 x/y 坐标")
+                    if (freshNodes != null) {
+                        val tap = NodeGrounding.relocate(id, nodes, freshNodes, screenW, screenH)
+                            ?: return Resolution.Err("id $id 的元素在执行前一个动作后已不在屏幕上（界面变了），本批后续动作未执行，请重新查看列表")
+                        return Resolution.Ok(tap)
+                    }
                     val tap = NodeGrounding.resolveTapId(id, nodes, screenW, screenH)
                         ?: return Resolution.Err("id $id 的元素没有有效位置，请改用 x/y 坐标")
                     Resolution.Ok(tap)

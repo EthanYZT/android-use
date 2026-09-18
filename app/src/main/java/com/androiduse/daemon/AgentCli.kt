@@ -25,7 +25,7 @@ object AgentCli {
     fun main(args: Array<String>) {
         if (args.size < 3) { println("usage: AgentCli <apkPath> <maxSteps> <task...>"); return }
         val apkPath = args[0]
-        val maxSteps = args[1].toIntOrNull() ?: 6
+        val maxSteps = args[1].toIntOrNull() ?: 15
         val task = args.drop(2).joinToString(" ")
         // ActivityThread 构造需要当前线程有 Looper（与 Daemon 的要点 1 同源）。
         if (Looper.myLooper() == null) Looper.prepareMainLooper()

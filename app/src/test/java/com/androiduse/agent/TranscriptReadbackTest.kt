@@ -3,6 +3,7 @@ package com.androiduse.agent
 import com.androiduse.actuation.Action
 import com.androiduse.daemon.DumpCodec.NodeRecord
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,6 +70,28 @@ class TranscriptReadbackTest {
         assertEquals(true, s.outcome!!.finished)
         assertEquals("型号 一加", s.outcome!!.summary)
         assertEquals(1_700_000_050_000L, s.outcome!!.endedAtMs)
+    }
+
+    @Test
+    fun executionsArrayRoundTrips() {
+        val t = sample()
+        val s1 = t.steps[0]
+        s1.executions.add(Execution(Action.Tap(500, 50), true, "ok", 800))
+        s1.executions.add(Execution(null, false, "未执行（前一个动作失败）", 0))
+        val st = TranscriptCodec.decode(lines(t, withOutcome = false))!!.steps[0]
+        assertEquals(2, st.executions.size)
+        assertEquals("Tap(xNorm=500, yNorm=50)", st.executions[0].action)
+        assertTrue(st.executions[0].ok)
+        assertFalse(st.executions[1].ok)
+        assertEquals("未执行（前一个动作失败）", st.executions[1].result)
+        assertEquals(st, t.steps[0].toStored())
+    }
+
+    @Test
+    fun legacyStepLineWithoutExecutionsDecodesToEmptyList() {
+        val st = TranscriptCodec.decode(lines(sample(), withOutcome = false))!!.steps[0]
+        assertTrue(st.executions.isEmpty())
+        assertEquals("ok", st.execution!!.result)
     }
 
     @Test

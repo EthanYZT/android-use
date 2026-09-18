@@ -30,7 +30,13 @@ data class Step(
     val index: Int,
     val observation: Observation,
     val replies: MutableList<ModelReply> = mutableListOf(),
+    /** 本步的汇总执行结果（给 UI/日志一眼看）；多动作时 ok = 全部成功，result 为各动作结果拼接。 */
     var execution: Execution? = null,
+    /**
+     * 与最后一条回复的 tool_calls **一一对应**的逐动作结果（一步多动作）。顺序执行，任一失败后
+     * 其余标记"未执行"。PromptBuilder 据此为每个 tool_call_id 回放一条 tool 消息。
+     */
+    val executions: MutableList<Execution> = mutableListOf(),
 )
 
 /** 这一步开始时屏幕的样子。base64 只在内存里给最近几步用，落盘只记路径。 */
@@ -81,6 +87,7 @@ data class StoredStep(
     val dumpError: String?,
     val replies: List<StoredReply>,
     val execution: StoredExecution?,
+    val executions: List<StoredExecution> = emptyList(),
 )
 
 data class StoredReply(
@@ -102,6 +109,7 @@ fun Step.toStored(): StoredStep = StoredStep(
     dumpError = observation.dumpError,
     replies = replies.map { StoredReply(it.note, it.toolCalls, it.finishReason, it.reasoningTokens, it.latencyMs) },
     execution = execution?.let { StoredExecution(it.action?.toString(), it.ok, it.result, it.costMs) },
+    executions = executions.map { StoredExecution(it.action?.toString(), it.ok, it.result, it.costMs) },
 )
 
 /** 任务结束时追加的一行：完成与否、结论、结束时间。 */
@@ -134,6 +142,11 @@ object TranscriptCodec {
         s.replies.forEachIndexed { i, r -> if (i > 0) append(','); append(encodeReply(r)) }
         append(']')
         s.execution?.let { append(",\"execution\":").append(encodeExecution(it)) }
+        if (s.executions.isNotEmpty()) {
+            append(",\"executions\":[")
+            s.executions.forEachIndexed { i, e -> if (i > 0) append(','); append(encodeExecution(e)) }
+            append(']')
+        }
         append('}')
     }
 
@@ -195,14 +208,15 @@ object TranscriptCodec {
                 latencyMs = (rm["latencyMs"] as? Long) ?: 0L,
             )
         } ?: emptyList()
-        val execution = (m["execution"] as? Map<*, *>)?.let { e ->
-            StoredExecution(
-                action = e["action"] as? String,
-                ok = e["ok"] as? Boolean ?: false,
-                result = e["result"] as? String ?: "",
-                costMs = (e["costMs"] as? Long) ?: 0L,
-            )
-        }
+        fun exec(e: Map<*, *>) = StoredExecution(
+            action = e["action"] as? String,
+            ok = e["ok"] as? Boolean ?: false,
+            result = e["result"] as? String ?: "",
+            costMs = (e["costMs"] as? Long) ?: 0L,
+        )
+        val execution = (m["execution"] as? Map<*, *>)?.let { exec(it) }
+        // 旧日志没有 executions 字段 → 空列表（不是把 execution 复制进去，读回要与写出时一致）。
+        val executions = (m["executions"] as? List<*>)?.mapNotNull { (it as? Map<*, *>)?.let { e -> exec(e) } } ?: emptyList()
         return StoredStep(
             index = index,
             screenshotPath = o["screenshotPath"] as? String,
@@ -211,6 +225,7 @@ object TranscriptCodec {
             dumpError = o["dumpError"] as? String,
             replies = replies,
             execution = execution,
+            executions = executions,
         )
     }
 

@@ -55,6 +55,13 @@ object MarkdownExporter {
                 e.action?.let { append("（").append(it).append('）') }
                 append("，").append(e.costMs).append(" ms\n")
             }
+            if (s.executions.size > 1) {
+                s.executions.forEachIndexed { k, e ->
+                    append("  - 动作 ").append(k + 1).append("：").append(if (e.ok) "✅ " else "❌ ").append(e.result.replace('\n', ' '))
+                    e.action?.let { append("（").append(it).append('）') }
+                    append('\n')
+                }
+            }
             if (s.nodesBlock.isNotEmpty()) {
                 append("\n<details><summary>元素列表</summary>\n\n```\n").append(s.nodesBlock).append("\n```\n\n</details>\n")
             }

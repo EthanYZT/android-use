@@ -100,4 +100,42 @@ class NodeGroundingTest {
         val block = NodeGrounding.promptBlock(many, W, H)
         assertEquals(NodeGrounding.MAX_NODES_IN_PROMPT, block.split("\n").size)
     }
+
+    // ---- relocate：一步多动作时，批内后续动作要在新 dump 里按身份重新定位（键盘布局中途变化）----
+
+    private fun key(id: Int, text: String, l: Int, t: Int) =
+        NodeRecord(id, l, t, l + 200, t + 100, text, "", "com.calc:id/digit_$text", "android.widget.Button", true, false)
+
+    @Test
+    fun relocate_findsSameElementInFreshDumpEvenWhenIdsAndBoundsShifted() {
+        val original = listOf(key(28, "6", 500, 1400), key(29, "7", 700, 1400))
+        // 新树多了一行，所有 id +1，且键位整体下移 100px
+        val fresh = listOf(key(10, "preview", 0, 100), key(29, "6", 500, 1500), key(30, "7", 700, 1500))
+        val tap = NodeGrounding.relocate(28, original, fresh, W, H)!!
+        assertEquals(NodeGrounding.centerNorm(fresh[1], W, H)!!.first, tap.xNorm)
+        assertEquals(NodeGrounding.centerNorm(fresh[1], W, H)!!.second, tap.yNorm)
+    }
+
+    @Test
+    fun relocate_returnsNullWhenElementGoneFromFreshDump() {
+        val original = listOf(key(28, "6", 500, 1400))
+        val fresh = listOf(key(3, "AC", 0, 0))
+        assertNull(NodeGrounding.relocate(28, original, fresh, W, H))
+    }
+
+    @Test
+    fun relocate_unknownIdIsNull() {
+        assertNull(NodeGrounding.relocate(99, listOf(key(28, "6", 500, 1400)), listOf(key(28, "6", 500, 1400)), W, H))
+    }
+
+    @Test
+    fun relocate_prefersNearestWhenSeveralMatchIdentity() {
+        // 两个同身份元素（比如两个"确定"按钮），取离原位置最近的那个
+        val a = NodeRecord(1, 0, 0, 200, 100, "确定", "", "", "android.widget.Button", true, false)
+        val original = listOf(a)
+        val far = NodeRecord(7, 0, 2000, 200, 2100, "确定", "", "", "android.widget.Button", true, false)
+        val near = NodeRecord(8, 0, 50, 200, 150, "确定", "", "", "android.widget.Button", true, false)
+        val tap = NodeGrounding.relocate(1, original, listOf(far, near), W, H)!!
+        assertEquals(NodeGrounding.centerNorm(near, W, H)!!.second, tap.yNorm)
+    }
 }

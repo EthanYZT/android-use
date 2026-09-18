@@ -32,11 +32,15 @@ class AgentLoopTest {
         private val nodesPerStep: (Int) -> List<NodeRecord>,
         private val performOk: Boolean = true,
         private val apps: List<AppEntry> = emptyList(),
+        /** 批内动作之间的重新 dump；null 表示环境不支持刷新。 */
+        private val refresh: (() -> List<NodeRecord>?)? = null,
     ) : Environment {
         override val screenW = 1000
         override val screenH = 2000
         val performed = mutableListOf<Action>()
+        var refreshCount = 0
         override fun installedApps(): List<AppEntry> = apps
+        override fun refreshNodes(): List<NodeRecord>? { refreshCount++; return refresh?.invoke() }
         override fun observe(stepIndex: Int): Observation {
             val nodes = nodesPerStep(stepIndex)
             return Observation("IMG$stepIndex", null, nodes, NodeGrounding.promptBlock(nodes, screenW, screenH), null)
@@ -119,17 +123,6 @@ class AgentLoopTest {
     }
 
     @Test
-    fun onlyFirstOfMultipleToolCallsIsExecutedAndModelIsTold() {
-        val (o, env, sent) = harness(
-            toolReply("两步一起", "tap" to """{"id":7}""", "back" to "{}"),
-            toolReply("完成", "finish" to """{"summary":"done"}"""),
-        )
-        assertTrue(o.finished)
-        assertEquals(listOf<Action>(Action.Tap(500, 375)), env.performed)
-        assertTrue(sent[1].contains("只执行"))
-    }
-
-    @Test
     fun threeConsecutiveInjectionFailuresAbort() {
         val env = FakeEnv({ listOf(node(7, "x")) }, performOk = false)
         val (o, _, _) = harness(
@@ -190,6 +183,110 @@ class AgentLoopTest {
         assertEquals(listOf<Action>(Action.OpenApp("时钟", "com.oplus.alarmclock/.AlarmClock")), env.performed)
         assertEquals("App 列表在任务开始时从 Environment 取一次并记进 Transcript", apps, o.transcript.apps)
         assertTrue("第一次请求的系统提示里就要有 App 列表", sent[0].contains("时钟"))
+    }
+
+    @Test
+    fun multipleToolCallsExecuteInOrderWithinOneStep() {
+        val (o, env, sent) = harness(
+            toolReply("连按 7 和 0", "tap" to """{"id":7}""", "tap" to """{"id":0}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+        )
+        assertTrue(o.finished)
+        assertEquals(listOf<Action>(Action.Tap(500, 375), Action.Tap(500, 25)), env.performed)
+        assertEquals(2, o.transcript.steps[0].executions.size)
+        assertTrue(o.transcript.steps[0].executions.all { it.ok })
+        // 每个 tool call 都要有自己的 tool 消息回放
+        assertTrue(sent[1].contains("\"tool_call_id\":\"call_0\"") && sent[1].contains("\"tool_call_id\":\"call_1\""))
+        assertEquals(2, o.transcript.steps.size)
+    }
+
+    @Test
+    fun failureMidSequenceStopsAndReportsTheRestAsNotExecuted() {
+        val (o, env, sent) = harness(
+            toolReply("按 7、99、0", "tap" to """{"id":7}""", "tap" to """{"id":99}""", "tap" to """{"id":0}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+        )
+        assertTrue(o.finished)
+        assertEquals(listOf<Action>(Action.Tap(500, 375)), env.performed)
+        val ex = o.transcript.steps[0].executions
+        assertEquals(3, ex.size)
+        assertTrue(ex[0].ok)
+        assertFalse(ex[1].ok); assertTrue(ex[1].result, ex[1].result.contains("99"))
+        assertFalse(ex[2].ok); assertTrue(ex[2].result, ex[2].result.contains("未执行"))
+        assertTrue("未执行也要作为 tool 结果回给模型", sent[1].contains("未执行"))
+    }
+
+    @Test
+    fun finishInTheMiddleExecutesPrecedingCallsThenFinishes() {
+        val (o, env, _) = harness(
+            toolReply("按 7 然后结束", "tap" to """{"id":7}""", "finish" to """{"summary":"done"}""", "tap" to """{"id":0}"""),
+        )
+        assertTrue(o.finished)
+        assertEquals("done", o.summary)
+        assertEquals(listOf<Action>(Action.Tap(500, 375)), env.performed)
+        assertEquals(3, o.transcript.steps[0].executions.size)
+    }
+
+    @Test
+    fun batchedIdTapsAfterTheFirstAreRelocatedInAFreshDump() {
+        // 第一次 tap 后界面重排：原 id7 的元素（text "关于本机"）在新树里变成 id 8 且下移。
+        val start = listOf(node(7, "关于本机"), node(0, "返回"))
+        val shifted = listOf(
+            NodeRecord(1, 0, 0, 1000, 100, "新出现的行", "", "", "", false, false),
+            NodeRecord(8, 0, 800, 1000, 900, "关于本机", "", "", "", true, false),
+            NodeRecord(2, 0, 100, 1000, 200, "返回", "", "", "", true, false),
+        )
+        val env = FakeEnv({ start }, refresh = { shifted })
+        val (o, _, _) = harness(
+            toolReply("连按两次 7", "tap" to """{"id":7}""", "tap" to """{"id":7}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            env = env,
+        )
+        assertTrue(o.finished)
+        // 第 1 下按步初树（中心 y=375），第 2 下按刷新后的位置（[800,900] 中心 850 → 425）
+        assertEquals(listOf<Action>(Action.Tap(500, 375), Action.Tap(500, 425)), env.performed)
+        assertEquals(1, env.refreshCount)
+    }
+
+    @Test
+    fun batchedIdTapWhoseElementVanishedFailsAndStopsTheBatch() {
+        val start = listOf(node(7, "关于本机"))
+        val env = FakeEnv({ start }, refresh = { listOf(node(3, "别的页面")) })
+        val (o, _, sent) = harness(
+            toolReply("连按", "tap" to """{"id":7}""", "tap" to """{"id":7}""", "tap" to """{"id":7}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            env = env,
+        )
+        assertTrue(o.finished)
+        assertEquals(1, env.performed.size)
+        val ex = o.transcript.steps[0].executions
+        assertFalse(ex[1].ok); assertTrue(ex[1].result, ex[1].result.contains("不在") || ex[1].result.contains("消失"))
+        assertTrue(ex[2].result.contains("未执行"))
+        assertTrue(sent[1].contains(ex[1].result))
+    }
+
+    @Test
+    fun withoutRefreshSupportBatchedTapsUseTheStepStartTree() {
+        val env = FakeEnv({ listOf(node(7, "x"), node(0, "y")) }) // refresh 返回 null
+        val (o, _, _) = harness(
+            toolReply("连按", "tap" to """{"id":7}""", "tap" to """{"id":0}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            env = env,
+        )
+        assertTrue(o.finished)
+        assertEquals(listOf<Action>(Action.Tap(500, 375), Action.Tap(500, 25)), env.performed)
+    }
+
+    @Test
+    fun callsBeyondThePerStepCapAreNotExecuted() {
+        val many = Array(AgentLoop.MAX_CALLS_PER_STEP + 2) { "tap" to """{"id":7}""" }
+        val (o, env, _) = harness(
+            toolReply("狂按", *many),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+        )
+        assertTrue(o.finished)
+        assertEquals(AgentLoop.MAX_CALLS_PER_STEP, env.performed.size)
+        assertEquals(AgentLoop.MAX_CALLS_PER_STEP + 2, o.transcript.steps[0].executions.size)
     }
 
     @Test
