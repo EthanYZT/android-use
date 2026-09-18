@@ -34,6 +34,8 @@ class AgentLoopTest {
         private val apps: List<AppEntry> = emptyList(),
         /** 批内动作之间的重新 dump；null 表示环境不支持刷新。 */
         private val refresh: (() -> List<NodeRecord>?)? = null,
+        /** 2a：系统接口调用的假实现；null 表示用默认"不支持"。 */
+        private val system: ((com.androiduse.capability.SystemCall) -> SystemResult)? = null,
     ) : Environment {
         override val screenW = 1000
         override val screenH = 2000
@@ -49,6 +51,11 @@ class AgentLoopTest {
             return Observation("IMG$stepIndex", null, nodes, NodeGrounding.promptBlock(nodes, screenW, screenH), null, ocrCount = ocrCount)
         }
         override fun perform(action: Action): Boolean { performed.add(action); return performOk }
+        val systemCalls = mutableListOf<com.androiduse.capability.SystemCall>()
+        override fun performSystem(call: com.androiduse.capability.SystemCall): SystemResult {
+            systemCalls.add(call)
+            return system?.invoke(call) ?: super.performSystem(call)
+        }
     }
 
     private class FakeSink : TranscriptSink {
@@ -325,5 +332,41 @@ class AgentLoopTest {
         runBlocking { AgentLoop(client, env, "glm", sink).run("t", 5) { } }
         assertEquals("t", sink.started!!.task)
         assertEquals(listOf(1, 2), sink.steps)
+    }
+
+    @Test
+    fun systemToolResultTextBecomesToolMessage() {
+        val env = FakeEnv({ listOf(node(0, "返回")) }, system = { c ->
+            if (c is com.androiduse.capability.SystemCall.CalendarQuery) SystemResult(true, "id=12 09-22 15:00–16:00 周会") else SystemResult(false, "不支持")
+        })
+        val (o, _, sent) = harness(
+            toolReply("先查日历", "calendar_query" to "{}"),
+            toolReply("找到了", "finish" to """{"summary":"周会在 9-22"}"""),
+            env = env,
+        )
+        assertTrue(o.finished)
+        assertEquals(1, env.systemCalls.size)
+        assertTrue(env.performed.isEmpty())   // 没走 perform
+        val ex = o.transcript.steps[0].executions[0]
+        assertTrue(ex.ok)
+        assertEquals("id=12 09-22 15:00–16:00 周会", ex.result)
+        assertTrue(sent[1].contains("\"role\":\"tool\"") && sent[1].contains("周会"))
+    }
+
+    @Test
+    fun systemToolFailureStopsBatchAndFeedsReasonBack() {
+        val env = FakeEnv({ listOf(node(0, "返回")) }, system = { SystemResult(false, "缺 READ_CALENDAR 权限") })
+        val (o, _, sent) = harness(
+            toolReply("查并点", "calendar_query" to "{}", "tap" to """{"id":0}"""),
+            toolReply("算了", "finish" to """{"summary":"x"}"""),
+            env = env,
+        )
+        assertTrue(o.finished)
+        val s = o.transcript.steps[0]
+        assertFalse(s.executions[0].ok)
+        assertEquals("缺 READ_CALENDAR 权限", s.executions[0].result)
+        assertEquals(AgentLoop.NOT_EXECUTED_AFTER_FAILURE, s.executions[1].result)
+        assertTrue(env.performed.isEmpty())
+        assertTrue(sent[1].contains("READ_CALENDAR"))
     }
 }

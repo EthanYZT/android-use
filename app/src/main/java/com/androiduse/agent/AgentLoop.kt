@@ -117,12 +117,20 @@ class AgentLoop(
                     is ToolCallResolver.Resolution.Err -> Execution(null, false, res.message, System.currentTimeMillis() - c0)
                     is ToolCallResolver.Resolution.Ok -> {
                         val action = res.action
-                        if (action is Action.Finish) {
-                            finish = action
-                            Execution(action, true, "finish", System.currentTimeMillis() - c0)
-                        } else {
-                            val ok = env.perform(action)
-                            Execution(action, ok, if (ok) "ok" else (env.lastError() ?: "注入失败"), System.currentTimeMillis() - c0)
+                        when (action) {
+                            is Action.Finish -> {
+                                finish = action
+                                Execution(action, true, "finish", System.currentTimeMillis() - c0)
+                            }
+                            // 2a：系统接口不经注入；返回的 text（查询结果/成功文案/失败原因）就是 tool 消息。
+                            is Action.System -> {
+                                val r = env.performSystem(action.call)
+                                Execution(action, r.ok, r.text, System.currentTimeMillis() - c0)
+                            }
+                            else -> {
+                                val ok = env.perform(action)
+                                Execution(action, ok, if (ok) "ok" else (env.lastError() ?: "注入失败"), System.currentTimeMillis() - c0)
+                            }
                         }
                     }
                 }
