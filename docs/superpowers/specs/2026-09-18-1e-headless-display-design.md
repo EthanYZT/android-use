@@ -69,7 +69,7 @@ ROTATES_WITH_CONTENT `1<<7`、DESTROY_CONTENT_ON_REMOVAL `1<<8`、TRUSTED `1<<10
 - `destroy()`：`VirtualDisplay.release()` + `ImageReader.close()` + 丢弃持有帧。
 - 纯逻辑部分抽成 `FrameGeometry`（rowStride/pixelStride → Bitmap 宽、裁剪、缩放尺寸计算），可单测。
 
-**协议 v2**（`DumpCodec` 改名为 `DaemonCodec`，仍是一行 JSON 请求 / 一行 JSON 响应，`cmd` 字段分派）：
+**协议 v2**（实施时未改名 `DumpCodec`——`DumpCodec.NodeRecord` 被 10+ 文件引用，改名只有噪音；新命令放在新对象 `DaemonProtocol`，dump 与节点编解码仍在 `DumpCodec`。仍是一行 JSON 请求 / 一行 JSON 响应，`cmd` 字段分派）：
 
 | cmd | 请求字段 | 成功响应 |
 |---|---|---|
@@ -157,3 +157,18 @@ ROTATES_WITH_CONTENT `1<<7`、DESTROY_CONTENT_ON_REMOVAL `1<<8`、TRUSTED `1<<10
 3. `AgentCli` 接线，真机 E2E 三任务。
 4. 设置页调试按钮适配（建屏/销屏/截图三按钮语义不变）。
 5. 更新 `docs/DESIGN.md` §4.2 状态、stage1 spec §0 表格、记忆。
+
+## 7. 实施结果（2026-09-18）
+
+计划 `docs/superpowers/plans/2026-09-18-1e-headless-display.md` 全部完成，8 个提交。
+
+- **单测**：177 绿（新增 `DaemonProtocolTest` 8、`FrameGeometryTest` 4、`LeaseRegistryTest` 4、`ScreenSessionCoreTest` 6；删除 `DisplayParserTest` 7）。
+- **守护进程侧真机**：`create_display` 幂等返回同一 id；空屏 `frame` 为 empty；起设置后取帧 70KB，界面静止再取仍拿到保留的最近一帧（字节相同）；`dump` 36 节点；租约 EOF 后守护进程销屏，`dumpsys display` 不再列出。
+- **E2E（AgentCli）**：「打开显示与亮度」2–3 步、「打开时钟」2 步、「日历→计算器」3 步，全部 finished；每个任务前后物理屏顶层均为 Launcher，headless 屏计数任务后归零，display 0 任务列表不增。
+- **App 路径**：设置页"建虚拟屏并打开设置"→ 屏出现；`am force-stop com.androiduse` 2 秒内守护进程日志 `lease N EOF, destroying display`，屏消失，无崩溃。
+
+**实施中发现并修正的两个问题**：
+1. `launchSettings` 起设置时不带 `-f 0x18000000` 会把物理屏后台已有的设置任务**搬到**虚拟屏（首帧停在用户上次看的 WLAN 页），销屏时连同用户的任务一起销毁。与 open_app 同一条规则，已补标志。**结论：任何 `am start --display <虚拟屏>` 都必须带 NEW_TASK|MULTIPLE_TASK。**
+2. `DaemonClient.apkPath` 原在 MainActivity 初始化，从设置页直接入口建屏会 lateinit 崩溃；改为 `App : Application` 的 onCreate 注入。
+
+**附带观察**：守护进程持 UiAutomation 连接期间，shell 的 `uiautomator dump` 会失败（系统同时只允许一个 UiAutomation）。调试物理屏时先 `pkill -f com.androiduse.daemon.Daemon`。

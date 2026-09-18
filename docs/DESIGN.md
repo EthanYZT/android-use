@@ -181,6 +181,10 @@ IInputManager.injectInputEvent(
 - 目标 App 在虚拟屏上运行，事件按 `displayId` 精准注入。
 - 效果：**用户前台正常用手机，Agent 在"影子屏"后台办事**；顶部提供"监工"入口把虚拟屏投到前台查看。
 - 这是豆包"任务后台静默运行、任务排队、多线程事务"的实现基础。
+- **状态（2026-09-18）**：已落地。root 守护进程用 `DisplayManager.createVirtualDisplay`（TRUSTED|OWN_CONTENT_ONLY|
+  DESTROY_CONTENT_ON_REMOVAL 等，flags 0x45c9）建屏并持有 ImageReader，物理屏完全不可见、空屏不镜像、销屏任务被销毁；
+  截图直接向守护进程要帧，不再落盘。见 `docs/superpowers/specs/2026-09-18-1e-headless-display-design.md`。
+  "监工"入口暂由主屏步骤卡片（每步截图）代替，真投屏未做。HOME 键仍会串到物理屏，动作集里继续不提供。
 
 ### 4.3 反风控（三条线，缺一不可）
 

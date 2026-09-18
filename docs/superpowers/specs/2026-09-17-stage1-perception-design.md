@@ -13,7 +13,7 @@
 | **1b** | 虚拟屏节点树获取（root 守护进程） | 本轮实现（先 spike） |
 | **1c** | 节点 grounding：提示词改「截图+节点列表」，按元素编号选，坐标从 bounds 出；截图坐标兜底 | 后续 |
 | **1d** | OCR 兜底：ML Kit 中文识别打包，裁区 OCR | 后续 |
-| **1e** | 真 headless 屏：`ADD_TRUSTED_DISPLAY`；顺带解决 Home 泄漏、销屏重挂 Activity | 后续 |
+| **1e** | 真 headless 屏（守护进程持 TRUSTED 虚拟屏）；解决销屏重挂、空屏镜像；Home 泄漏仍在 | ✅ 2026-09-18，见 `2026-09-18-1e-headless-display-design.md` |
 
 **关键真机事实（2026-09-17 核实）**：本机 `uiautomator dump` 只有 `[--verbose][--compressed][file]`，**无 display 参数，只能 dump 物理屏 display 0**。App 跑在虚拟屏，故节点树不能靠 shell，必须自持 `UiAutomation`。这条决定了 1b 走守护进程。
 
@@ -158,4 +158,4 @@ MAIN/LAUNCHER，Android 11+ 包可见性）；`AgentCli` 在裸 app_process 里�
 起的所有任务（时钟/日历/计算器）被系统**重挂到 display 0**，计算器直接成了物理屏前台
 （`dumpsys activity` 见 Display #0 topResumedActivity=计算器）。之前只有设置一个 App 时同样发生，
 open_app 让它更显眼。归 1e「销屏重挂 Activity」：销屏前 `am task remove` 掉虚拟屏上的任务，或真
-headless 屏。**5 App 验收铺开时每跑完一轮要留意物理屏被顶上来的 App。**
+headless 屏。**5 App 验收铺开时每跑完一轮要留意物理屏被顶上来的 App。** → **已由 1e 解决（2026-09-18）**：DESTROY_CONTENT_ON_REMOVAL 让销屏时任务被销毁，E2E 三任务后物理屏顶层与任务列表不变。
