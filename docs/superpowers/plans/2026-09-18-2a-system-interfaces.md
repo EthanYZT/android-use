@@ -1525,3 +1525,130 @@ git commit -m "docs(2a): 真机验收结果与 DESIGN §9 阶段 2 状态
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 9: 短信跳板泄漏修复 + Intent 落屏核对 + CLI Provider 明确失败文案（spec §7 待办 1、2）
+
+**背景**：真机验收 ③ 触碰红线——`sms_compose` 的 `am start -a SENDTO -p com.android.mms` 解析到跳板
+`com.android.mms/.ui.conversation.LaunchConversationActivity`，它以 `NEW_TASK|NEW_DOCUMENT|CLEAR_TASK` 二次启动
+`com.android.mms/.ui.conversation.ConversationActivity`，新任务落到**物理屏 display 0**。手动 `am start --display <虚拟屏> -f 0x18000000 -a SENDTO -d smsto:… --es sms_body … -n com.android.mms/.ui.conversation.ConversationActivity`
+直接起目标 Activity 时任务留在虚拟屏。另外 AgentCli（root app_process 的 systemMain Context）调 Provider 抛
+`SecurityException: Unable to find app for caller`，模型只看到泛泛的"系统接口调用失败"。
+
+**本机实测（2026-09-18，OnePlus Ace 5 / ColorOS 15）**：
+- `pm resolve-activity -a SENDTO -d smsto:… -p com.android.mms` → `com.android.mms/.ui.conversation.LaunchConversationActivity`
+- `pm resolve-activity -a DIAL -d tel:…` → `com.android.contacts/.DialtactsActivityAlias`
+- `dumpsys activity activities` 结构：第 0 列 `Display #0 (activities from top to bottom):` 头，其下缩进的
+  `* Task{14a98a8 #210 type=standard A=10418:com.androiduse U=0 visible=true …}` 自顶向下；第 0 列的下一个非
+  `Display #` 头（本机是 `ActivityTaskSupervisor state:`）之后同样的 `* Task{…}` 行会**再列一遍**，不能算。
+- `am stack remove <ID>` 存在（`am task remove` 不存在）。NEW_TASK 起的任务 id 即 root task id，可用它撤回。
+
+**Files:**
+- Modify: `app/src/main/java/com/androiduse/capability/SystemIntents.kt`
+- Create: `app/src/main/java/com/androiduse/capability/DisplayTasks.kt`（纯解析）
+- Modify: `app/src/main/java/com/androiduse/capability/SystemInterfaces.kt`
+- Modify: `app/src/main/java/com/androiduse/AndroidEnvironment.kt`
+- Modify: `app/src/main/java/com/androiduse/daemon/AgentCli.kt`
+- Modify: `app/src/test/java/com/androiduse/capability/SystemIntentsTest.kt`
+- Create: `app/src/test/java/com/androiduse/capability/DisplayTasksTest.kt`
+- Create: `app/src/test/resources/dumpsys-activity-two-displays.txt`（真机抓的 fixture，见 Step 2）
+
+- [ ] **Step 1: 已知跳板 → 直接起目标 Activity（纯逻辑 + 测试）**
+
+`SystemIntents`：
+
+```kotlin
+/** 已知跳板 → 真正的会话 Activity。键是 resolveActivity 得到的 flattenToString()（长格式），值是 `am start -n` 用的组件。 */
+val SMS_TRAMPOLINES: Map<String, String> = mapOf(
+    "com.android.mms/com.android.mms.ui.conversation.LaunchConversationActivity" to "com.android.mms/.ui.conversation.ConversationActivity",
+)
+/** resolved 为已知跳板时返回应直接启动的组件，否则 null（走 `-p` 交给系统解析）。 */
+fun smsComponentFor(resolved: String?): String? = resolved?.let { SMS_TRAMPOLINES[it] }
+```
+
+`argv(call, displayId, mapPackage, smsComponent: String? = null)`：`SmsCompose` 分支在 `smsComponent != null` 时输出
+`-n <smsComponent>` 且**不再输出 `-p`**（`-n` 已定包）；为 null 时维持现状（`-p com.android.mms`）。action/data/`--es sms_body` 两种情况都保留。
+
+测试（`SystemIntentsTest`）：
+- `smsComponentFor("com.android.mms/com.android.mms.ui.conversation.LaunchConversationActivity") == "com.android.mms/.ui.conversation.ConversationActivity"`；`smsComponentFor("com.other/.X") == null`；`smsComponentFor(null) == null`
+- `argv(SmsCompose, 7, null, "com.android.mms/.ui.conversation.ConversationActivity")` 含 `-n <组件>`、不含 `-p`，仍含 `-a SENDTO`、`-d smsto:…`、`--es sms_body …`
+- 现有 `smsPinsPackageAndFillsBody` 不变（默认参数 → `-p`）
+
+- [ ] **Step 2: `DisplayTasks` 纯解析 + 真机 fixture**
+
+```kotlin
+/** `dumpsys activity activities` → displayId → 该屏任务 id（自顶向下）。只认第 0 列 `Display #N` 头下、下一个第 0 列非 Display 头之前的 `* Task{… #id …}` 行。 */
+object DisplayTasks {
+    fun parse(dump: String): Map<Int, List<Int>>
+    /** 新出现在 display 0 的任务 id（after − before），空列表即没泄漏。 */
+    fun leakedToPhysical(before: Map<Int, List<Int>>, after: Map<Int, List<Int>>): List<Int>
+}
+```
+
+正则建议：头 `^Display #(\d+)`；任务 `^\s+\* Task\{\w+ #(\d+)`；任何 `^\S` 且不是 Display 头的行结束当前归属（之后的 Task 行不算，直到下一个 Display 头）。同一 display 里 id 去重、保持首次出现顺序。
+
+fixture：设备已连（`ANDROID_SERIAL=3B658700ZQ400000`），用守护进程建一块虚拟屏抓一份**同时含 Display #0 与虚拟屏**的 dump：
+
+```bash
+export ANDROID_SERIAL=3B658700ZQ400000
+APK=$(adb shell pm path com.androiduse | sed 's/package://' | tr -d '\r')
+adb shell su root env CLASSPATH=$APK app_process /system/bin com.androiduse.daemon.DaemonCli $APK create   # 打印虚拟屏 id，记为 D
+adb shell su root am start --display D -f 0x18000000 -a android.settings.SETTINGS
+sleep 2; adb shell dumpsys activity activities > app/src/test/resources/dumpsys-activity-two-displays.txt
+adb shell su root env CLASSPATH=$APK app_process /system/bin com.androiduse.daemon.DaemonCli $APK destroy
+```
+
+（DaemonCli 用法见 `app/src/main/java/com/androiduse/daemon/DaemonCli.kt` 文件头；若 create 需要先有守护进程，看 `DaemonClient` 怎么拉起。抓不到虚拟屏就在 fixture 里**手工**追加一段 `Display #D` 块并在文件头注释说明，但优先真抓。）
+
+测试（`DisplayTasksTest`）：fixture 解析出 display 0 的任务列表与 Display #D 的任务列表（断言各自第一个 id 与真实 dump 一致、D 的列表含设置的任务）；重复列出的段不被计入（display 0 的 id 无重复）；`leakedToPhysical` 三例：after 多出一个 id → 返回它；after 与 before 相同 → 空；新 id 只出现在虚拟屏 → 空。
+
+- [ ] **Step 3: `SystemInterfaces.startIntent` 落屏核对 + 撤回**
+
+```kotlin
+private fun startIntent(call: SystemCall, mapPackage: String?): SystemResult {
+    val smsComponent = (call as? SystemCall.SmsCompose)?.let { SystemIntents.smsComponentFor(resolveSmsHandler(it.number)) }
+    val argv = SystemIntents.argv(call, screen.logicalDisplayId, mapPackage, smsComponent) ?: return SystemResult(false, "不是 Intent 类调用")
+    val before = DisplayTasks.parse(dumpActivities())
+    val r = RootShell.execArgv(argv)
+    if (!r.ok) return SystemResult(false, "启动失败: ${(r.stderr.ifBlank { r.stdout }).take(120)}")
+    Thread.sleep(Injector.jitter(INTENT_SETTLE_MS))
+    val leaked = DisplayTasks.leakedToPhysical(before, DisplayTasks.parse(dumpActivities()))
+    if (leaked.isNotEmpty()) {
+        leaked.forEach { RootShell.execArgv(listOf("am", "stack", "remove", it.toString())) }   // 尽力撤回，不看结果
+        Log.w(TAG, "intent leaked to display 0: tasks=$leaked call=$call")
+        return SystemResult(false, "页面落到了物理屏而不是虚拟屏，已撤回；请改用界面操作完成")
+    }
+    return SystemResult(true, SystemIntents.successText(call, mapPackage))
+}
+private fun dumpActivities(): String = RootShell.execArgv(listOf("dumpsys", "activity", "activities")).stdout
+private fun resolveSmsHandler(number: String): String? =
+    context.packageManager.resolveActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).setPackage(SystemIntents.SMS_PACKAGE), 0)
+        ?.activityInfo?.let { ComponentName(it.packageName, it.name).flattenToString() }
+```
+
+要点：`dumpsys` 失败（stdout 空）时 `parse` 得空 map，`leakedToPhysical` 自然为空——不因核对本身失败而拦截启动，但要 `Log.w` 一条。核对对**所有** Intent 类工具生效（set_alarm/dial/navigate/open_settings 同样受益）。
+
+- [ ] **Step 4: CLI 的 Provider 工具明确失败文案**
+
+`SystemInterfaces(context, screen, providersAvailable: Boolean = true)`：四个 Provider 分支在 `!providersAvailable` 时直接
+`SystemResult(false, "CLI 不支持日历/联系人工具，请用 App 进程跑此任务，或改用界面操作")`，不碰 ContentResolver。
+`AndroidEnvironment(screen, context, textReader = null, providersAvailable: Boolean = true)` 透传；`AgentCli` 构造时传 `providersAvailable = false`。
+App 侧调用方不改（默认 true）。
+
+- [ ] **Step 5: 单测 + 安装**
+
+```bash
+./gradlew :app:testDebugUnitTest --tests 'com.androiduse.capability.*' -q && ./gradlew :app:installDebug -q
+```
+
+全绿、安装成功。真机 E2E（③ 重跑、dial 模型 E2E）由控制器做，不在本任务内。
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/src/main/java/com/androiduse/capability/SystemIntents.kt app/src/main/java/com/androiduse/capability/DisplayTasks.kt app/src/main/java/com/androiduse/capability/SystemInterfaces.kt app/src/main/java/com/androiduse/AndroidEnvironment.kt app/src/main/java/com/androiduse/daemon/AgentCli.kt app/src/test/java/com/androiduse/capability/ app/src/test/resources/dumpsys-activity-two-displays.txt docs/superpowers/plans/2026-09-18-2a-system-interfaces.md
+git commit -m "fix(2a): sms_compose 绕过跳板直起会话页；Intent 启动后核对落屏，泄漏到物理屏即撤回报失败；CLI Provider 明确失败文案
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```

@@ -26,6 +26,25 @@ class SystemIntentsTest {
         assertTrue(SystemIntents.successText(SystemCall.SmsCompose("1", "x"), null).contains("尚未发送"))
     }
 
+    @Test fun smsComponentForKnownTrampolineMapsToConversationActivity() {
+        assertEquals(
+            "com.android.mms/.ui.conversation.ConversationActivity",
+            SystemIntents.smsComponentFor("com.android.mms/com.android.mms.ui.conversation.LaunchConversationActivity"),
+        )
+        assertNull(SystemIntents.smsComponentFor("com.other/.X"))
+        assertNull(SystemIntents.smsComponentFor(null))
+    }
+
+    @Test fun smsWithKnownComponentTargetsDirectlyWithoutPackageFlag() {
+        val argv = SystemIntents.argv(
+            SystemCall.SmsCompose("13800000000", "我晚点到"), 7, null,
+            "com.android.mms/.ui.conversation.ConversationActivity",
+        )!!
+        assertTrue(argv.containsAll(listOf("-a", "android.intent.action.SENDTO", "-d", "smsto:13800000000", "--es", "sms_body", "我晚点到")))
+        assertTrue(argv.containsAll(listOf("-n", "com.android.mms/.ui.conversation.ConversationActivity")))
+        assertTrue(argv.none { it == "-p" })
+    }
+
     @Test fun dialDoesNotCall() {
         val argv = SystemIntents.argv(SystemCall.Dial("10086"), 7, null)!!
         assertTrue(argv.containsAll(listOf("-a", "android.intent.action.DIAL", "-d", "tel:10086")))

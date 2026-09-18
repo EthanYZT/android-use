@@ -28,11 +28,13 @@ class AndroidEnvironment(
     private val context: Context?,
     /** 1d：端侧 OCR 补洞；null 表示不做 OCR（AgentCli），列表为纯节点树。 */
     private val textReader: TextReader? = null,
+    /** false：Provider 类系统工具（日历/联系人）不可用，透传给 [SystemInterfaces]（AgentCli 裸 systemMain Context 用）。 */
+    private val providersAvailable: Boolean = true,
 ) : Environment {
 
     private companion object { const val TAG = "AndroidEnvironment" }
 
-    private val system: SystemInterfaces? = context?.let { SystemInterfaces(it, screen) }
+    private val system: SystemInterfaces? = context?.let { SystemInterfaces(it, screen, providersAvailable) }
 
     override fun performSystem(call: SystemCall): SystemResult =
         system?.perform(call) ?: SystemResult(false, "没有 Context，系统接口工具不可用")

@@ -22,7 +22,21 @@ object SystemIntents {
     const val FLAGS = "0x18000000"
     const val SMS_PACKAGE = "com.android.mms"
 
-    fun argv(call: SystemCall, displayId: Int, mapPackage: String?): List<String>? {
+    /**
+     * 已知跳板 → 真正的会话 Activity。键是 `resolveActivity` 得到的 `flattenToString()`（长格式），
+     * 值是 `am start -n` 用的组件。真机实测（2026-09-18 OnePlus Ace 5）：SENDTO 解析到
+     * `LaunchConversationActivity`，它自己用 `NEW_TASK|NEW_DOCUMENT|CLEAR_TASK` 二次起
+     * `ConversationActivity`，二次启动的新任务不认我们传的 `--display`，落到物理屏 0。
+     * 已知跳板直接起目标 Activity 可以绕开这一步。
+     */
+    val SMS_TRAMPOLINES: Map<String, String> = mapOf(
+        "com.android.mms/com.android.mms.ui.conversation.LaunchConversationActivity" to "com.android.mms/.ui.conversation.ConversationActivity",
+    )
+
+    /** resolved 为已知跳板时返回应直接启动的组件，否则 null（走 `-p` 交给系统解析）。 */
+    fun smsComponentFor(resolved: String?): String? = resolved?.let { SMS_TRAMPOLINES[it] }
+
+    fun argv(call: SystemCall, displayId: Int, mapPackage: String?, smsComponent: String? = null): List<String>? {
         val base = listOf("am", "start", "--display", displayId.toString(), "-f", FLAGS)
         return when (call) {
             is SystemCall.SetAlarm -> base + listOf(
@@ -33,8 +47,8 @@ object SystemIntents {
             ) + (call.label?.let { listOf("--es", "android.intent.extra.alarm.MESSAGE", it) } ?: emptyList())
             is SystemCall.SmsCompose -> base + listOf(
                 "-a", "android.intent.action.SENDTO", "-d", "smsto:${call.number}",
-                "--es", "sms_body", call.body, "-p", SMS_PACKAGE,
-            )
+                "--es", "sms_body", call.body,
+            ) + (if (smsComponent != null) listOf("-n", smsComponent) else listOf("-p", SMS_PACKAGE))
             is SystemCall.Dial -> base + listOf("-a", "android.intent.action.DIAL", "-d", "tel:${call.number}")
             is SystemCall.Navigate -> base + listOf("-a", "android.intent.action.VIEW", "-d", "geo:0,0?q=${encodeQuery(call.query)}") +
                 (mapPackage?.let { listOf("-p", it) } ?: emptyList())

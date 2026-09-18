@@ -43,7 +43,9 @@ object AgentCli {
         val store = TranscriptStore(File("/data/local/tmp/androiduse_transcripts"))
         try {
             val outcome = runBlocking {
-                AgentLoop(client, AndroidEnvironment(screen, ctx), BuildConfig.ARK_MODEL_ID, store)
+                // systemMain 的系统 Context 调 Provider 会被 SecurityException 拒绝（不是权限问题，pm grant 救不了）；
+                // providersAvailable=false 让日历/联系人工具直接给出明确失败文案，不去碰 ContentResolver。
+                AgentLoop(client, AndroidEnvironment(screen, ctx, providersAvailable = false), BuildConfig.ARK_MODEL_ID, store)
                     .run(task, maxSteps = maxSteps) { println(it) }
             }
             println("RESULT: finished=${outcome.finished} ${outcome.summary}")
