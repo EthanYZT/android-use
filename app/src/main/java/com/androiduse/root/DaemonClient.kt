@@ -4,7 +4,10 @@ import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.util.Log
 import com.androiduse.daemon.Daemon
+import com.androiduse.daemon.DaemonProtocol
 import com.androiduse.daemon.DumpCodec
+import com.androiduse.display.DisplayService
+import java.io.Closeable
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -18,7 +21,7 @@ import java.nio.charset.StandardCharsets
  * 透明重启：连不上就 [ensureStarted] 拉起再重试（守护进程空闲 60s 自杀，见 Daemon）。
  * 全部是阻塞 IO，调用方应放在 IO 线程（AgentLoop 已在 Dispatchers.IO）。
  */
-object DaemonClient {
+object DaemonClient : DisplayService {
 
     private const val TAG = "DaemonClient"
 
@@ -65,6 +68,46 @@ object DaemonClient {
             }
         }
     }
+
+    // ---- DisplayService（v2）----
+
+    override fun openLease(): Closeable? {
+        val s = openRawSocket() ?: return null
+        return try {
+            s.outputStream.write((DaemonProtocol.encodeLease() + "\n").toByteArray(StandardCharsets.UTF_8))
+            s.outputStream.flush()
+            val line = BufferedReader(InputStreamReader(s.inputStream, StandardCharsets.UTF_8)).readLine()
+            if (line != null && DaemonProtocol.parseSimpleResponse(line) == null) {
+                // 租约 socket 上不能再发请求；句柄只负责 close（守护进程读到 EOF 即销屏）。
+                Closeable { try { s.close() } catch (_: Exception) {} }
+            } else {
+                s.close(); null
+            }
+        } catch (e: Exception) {
+            try { s.close() } catch (_: Exception) {}
+            null
+        }
+    }
+
+    override fun createDisplay(w: Int, h: Int, dpi: Int): DaemonProtocol.CreateResult {
+        val line = rawRequest(DaemonProtocol.encodeCreateDisplay(w, h, dpi))
+            ?: return DaemonProtocol.CreateResult.Err("daemon unreachable")
+        return DaemonProtocol.parseCreateResponse(line)
+    }
+
+    override fun destroyDisplay(): Boolean {
+        val line = rawRequest(DaemonProtocol.encodeDestroyDisplay()) ?: return false
+        return DaemonProtocol.parseSimpleResponse(line) == null
+    }
+
+    override fun frame(maxWidth: Int, quality: Int): DaemonProtocol.FrameResult {
+        val line = rawRequest(DaemonProtocol.encodeFrame(maxWidth, quality))
+            ?: return DaemonProtocol.FrameResult.Err("daemon unreachable")
+        return DaemonProtocol.parseFrameResponse(line)
+    }
+
+    override fun launchSettings(displayId: Int): Boolean =
+        RootShell.execArgv(listOf("am", "start", "--display", displayId.toString(), "-a", "android.settings.SETTINGS")).ok
 
     private fun tryConnect(): LocalSocket? =
         try {
