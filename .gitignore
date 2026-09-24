@@ -15,3 +15,6 @@ build/
 .idea/
 .DS_Store
 local.properties
+
+# 第三方文档副本（TypeSafe 官方文档），仅本地参考，不入库
+docs/typesafe_docs/
