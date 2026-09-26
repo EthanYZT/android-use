@@ -6,3 +6,5 @@ ark.apiKey=你的 Agent Plan 专属 API Key
 ark.modelId=glm-5.3-flash
 # 必须用 /api/plan/v3。用 /api/v3 会走按量计费并产生额外费用
 ark.baseUrl=https://ark.cn-beijing.volces.com/api/plan/v3
+# TypeSafe Jev（System One）API Key，console.typesafe.ai 申请；留空则不启用 tap 的 target（按描述定位）
+typesafe.apiKey=

@@ -24,6 +24,8 @@ android {
         buildConfigField("String", "ARK_API_KEY", "\"${localProps.getProperty("ark.apiKey", "")}\"")
         buildConfigField("String", "ARK_MODEL_ID", "\"${localProps.getProperty("ark.modelId", "")}\"")
         buildConfigField("String", "ARK_BASE_URL", "\"${localProps.getProperty("ark.baseUrl", "https://ark.cn-beijing.volces.com/api/plan/v3")}\"")
+        // 按描述定位（spec 2026-09-26）：为空则 tap 不提供 target 形态
+        buildConfigField("String", "TYPESAFE_API_KEY", "\"${localProps.getProperty("typesafe.apiKey", "")}\"")
     }
 
     buildFeatures {
