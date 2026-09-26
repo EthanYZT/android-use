@@ -105,6 +105,12 @@ object DumpCodec {
         }
     }
 
+    /**
+     * 读 transcript 目录里的 `step-N.nodes.json`（[com.androiduse.agent.TranscriptCodec.encodeNodesFile] 写的），
+     * 只取 nodes，忽略 ocr 原始行。供离线回放用。
+     */
+    fun parseNodesFile(json: String): List<NodeRecord> = parseNodesArray(json)
+
     /** 从响应里切出 `"nodes":[ {..},{..} ]` 的每个对象并解析。 */
     private fun parseNodesArray(json: String): List<NodeRecord> {
         val marker = "\"nodes\""

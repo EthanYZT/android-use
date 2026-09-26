@@ -51,3 +51,9 @@ dependencies {
     implementation(libs.mlkit.text.recognition.chinese)
     testImplementation(libs.junit)
 }
+
+// 按描述定位的离线回放（LocateReplayTest）：把 LOCATE_CASES 透传给测试 JVM，且设了它就不让测试任务被判"最新"而跳过。
+tasks.withType<Test>().configureEach {
+    System.getenv("LOCATE_CASES")?.let { environment("LOCATE_CASES", it) }
+    outputs.upToDateWhen { System.getenv("LOCATE_CASES") == null }
+}

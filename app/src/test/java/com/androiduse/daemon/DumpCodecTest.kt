@@ -138,4 +138,14 @@ class DumpCodecResponseTest {
         val legacy = (DumpCodec.parseResponse("""{"ok":true,"displayId":1,"nodes":[{"id":0,"b":[0,0,1,1],"text":"","desc":"","resId":"","cls":"","click":false,"scroll":false}]}""") as DumpCodec.DumpResult.Ok).nodes[0]
         assertTrue(!legacy.editable)
     }
+
+    @Test
+    fun nodesFileRoundTripsIncludingBracketsInText() {
+        val nodes = listOf(
+            DumpCodec.NodeRecord(1, 0, 0, 10, 10, "a]b{c}\"d", "desc", "x:id/y", "cls", true, false, editable = true),
+            DumpCodec.NodeRecord(2, 5, 5, 20, 20, "", "", "", "ocr", false, true),
+        )
+        val file = com.androiduse.agent.TranscriptCodec.encodeNodesFile(nodes, listOf(com.androiduse.agent.OcrLine("行", 1, 2, 3, 4)))
+        assertEquals(nodes, DumpCodec.parseNodesFile(file))
+    }
 }
