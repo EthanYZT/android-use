@@ -6,6 +6,12 @@ package com.androiduse.actuation
  */
 sealed class Action {
     data class Tap(val xNorm: Int, val yNorm: Int) : Action()
+
+    /**
+     * 按描述点击（spec 2026-09-26）：[target] 是规划器对元素的自然语言描述。不直接注入——
+     * AgentLoop 先经 Grounder 在全量节点里定位成普通 [Tap] 再执行；toShell 对它返回 null。
+     */
+    data class TapTarget(val target: String) : Action()
     data class Swipe(
         val x1Norm: Int, val y1Norm: Int,
         val x2Norm: Int, val y2Norm: Int,

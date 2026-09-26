@@ -51,6 +51,8 @@ object ActionCommand {
             is Action.Type -> null
             // 系统接口走 Environment.performSystem（SystemIntents.argv / ContentResolver），不经 shell 字符串。
             is Action.System -> null
+            // 按描述点击先由 AgentLoop 经 Grounder 换成 Tap；直接到这里说明调用方跳过了定位，失败关闭。
+            is Action.TapTarget -> null
         }
     }
 

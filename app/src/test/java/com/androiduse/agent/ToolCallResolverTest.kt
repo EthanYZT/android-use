@@ -141,4 +141,47 @@ class ToolCallResolverTest {
         val call = (ok(r) as Action.System).call as com.androiduse.capability.SystemCall.CalendarQuery
         assertEquals(com.androiduse.capability.TimeText.parseDateTime("2026-09-18 00:00", zone)!!, call.fromMs)
     }
+
+    // ---- tap 的 target 形态（spec 2026-09-26 §2）----
+
+    private fun tap(args: String, enabled: Boolean = true) =
+        ToolCallResolver.resolve(ToolCall("c", "tap", args), nodes, w, h, targetEnabled = enabled)
+
+    @Test
+    fun tapTargetResolvesToTapTargetAction() {
+        assertEquals(Action.TapTarget("底部的'去结算'"), ok(tap("""{"target":" 底部的'去结算' "}""")))
+    }
+
+    @Test
+    fun idWinsOverTarget() {
+        assertEquals(Action.Tap(500, 500), ok(tap("""{"id":7,"target":"别的"}""")))
+    }
+
+    @Test
+    fun targetWinsOverCoordinates() {
+        assertEquals(Action.TapTarget("去结算"), ok(tap("""{"target":"去结算","x":1,"y":2}""")))
+    }
+
+    @Test
+    fun targetWhenDisabledIsAnError() {
+        assertTrue(err(tap("""{"target":"去结算"}""", enabled = false)).contains("未启用"))
+    }
+
+    @Test
+    fun blankTargetIsAnError() {
+        assertTrue(err(tap("""{"target":"  "}""")).contains("不能为空"))
+    }
+
+    @Test
+    fun nullOrNonStringTargetIsIgnoredAndXyIsUsed() {
+        // Review Focus 2：不能生成 TapTarget("null")
+        assertEquals(Action.Tap(120, 880), ok(tap("""{"target":null,"x":120,"y":880}""")))
+        assertEquals(Action.Tap(120, 880), ok(tap("""{"target":5,"x":120,"y":880}""")))
+    }
+
+    @Test
+    fun missingEverythingMentionsTargetOnlyWhenEnabled() {
+        assertTrue(err(tap("{}")).contains("target"))
+        assertEquals("tap 需要 id 或 x/y 坐标", err(tap("{}", enabled = false)))
+    }
 }

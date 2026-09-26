@@ -30,6 +30,8 @@ object ToolCallResolver {
         /** 2a：calendar_query 默认时间范围用；测试注入固定时钟。 */
         nowMs: Long = System.currentTimeMillis(),
         zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        /** tap 的 target 形态是否启用（= AgentLoop 有 Grounder）。未启用时 target 当解析错误。 */
+        targetEnabled: Boolean = false,
     ): Resolution {
         val a = call.argumentsJson
         return when (call.name) {
@@ -46,10 +48,17 @@ object ToolCallResolver {
                         ?: return Resolution.Err("id $id 的元素没有有效位置，请改用 x/y 坐标")
                     Resolution.Ok(tap)
                 } else {
+                    val target = targetOf(a)
+                    if (target != null) {
+                        if (!targetEnabled) return Resolution.Err("tap 的 target 形态未启用，请用 id 或 x/y 坐标")
+                        if (target.isBlank()) return Resolution.Err("tap 的 target 不能为空：写清要点的元素（文字、位置），或改用 id / x/y")
+                        return Resolution.Ok(Action.TapTarget(target.trim()))
+                    }
                     val x = ResponseParser.intField(a, "x")
                     val y = ResponseParser.intField(a, "y")
-                    if (x == null || y == null) Resolution.Err("tap 需要 id 或 x/y 坐标")
-                    else Resolution.Ok(Action.Tap(x, y))
+                    if (x == null || y == null) {
+                        Resolution.Err(if (targetEnabled) "tap 需要 id、target 或 x/y 坐标" else "tap 需要 id 或 x/y 坐标")
+                    } else Resolution.Ok(Action.Tap(x, y))
                 }
             }
             "swipe" -> {
@@ -91,4 +100,11 @@ object ToolCallResolver {
             else -> Resolution.Err("没有名为 ${call.name.take(30)} 的工具")
         }
     }
+
+    /**
+     * tap 参数里的 target，只认 JSON **字符串**值。`"target":null` / 数字 → null（当作没给），
+     * 否则 ResponseParser.field 会把字面量 null 读成字符串 "null"。
+     */
+    fun targetOf(argumentsJson: String): String? =
+        (MiniJson.parse(argumentsJson) as? Map<*, *>)?.get("target") as? String
 }
