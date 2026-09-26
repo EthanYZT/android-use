@@ -63,12 +63,27 @@ object PromptBuilder {
     /** 交接规则（spec handoff §2）：付款与人机验证必须本人操作；短信验证码、发送/拨出/导航不交接。 */
     const val HANDOFF_RULE = "付款、提交订单、结算确认，以及滑块/选图这类人机验证，必须由用户本人操作：做到那一页就调用 handoff 说明停在哪，不要自己点支付、不要拖滑块。短信验证码不算，自己从通知或界面读。发送短信、拨出电话、开始导航可以直接做。"
 
+    /** 未启用 target 时的第二条 tap 规则（与 2026-09-26 之前逐字一致）。 */
+    const val TAP_XY_RULE = "目标不在列表里（图标、图片等）才用 tap 的 x/y 坐标兜底。"
+
+    /** 启用 target 时替换 [TAP_XY_RULE]（spec 2026-09-26 §2）：id → target → x/y。 */
+    const val TAP_TARGET_RULE = "目标不在列表里时，用 tap 的 target 描述它（写清上面的文字、在屏幕哪一部分、属于哪一行），由系统在完整界面里找到它；定位失败会告诉你原因和候选。只有目标没有文字也不是界面元素（图片、画面里的图标）时，才用 tap 的 x/y 坐标兜底。"
+
+    private const val TAP_TOOL = """{"type":"function","function":{"name":"tap","description":"点击。首选传 id（元素列表里的编号，最准）；目标不在列表里时才传 x/y 归一化坐标。","parameters":{"type":"object","properties":{"id":{"type":"integer","description":"元素列表里的 id"},"x":{"type":"integer","description":"归一化 x，0-1000"},"y":{"type":"integer","description":"归一化 y，0-1000"}}}}}"""
+
+    private const val TAP_TOOL_WITH_TARGET = """{"type":"function","function":{"name":"tap","description":"点击。首选传 id（元素列表里的编号，最准）；目标不在列表里时传 target 描述它；都不行才传 x/y 归一化坐标。","parameters":{"type":"object","properties":{"id":{"type":"integer","description":"元素列表里的 id"},"target":{"type":"string","description":"要点的元素的描述，写清文字和位置，例如 底部的'去结算'按钮、生椰拿铁那一行的'选规格'"},"x":{"type":"integer","description":"归一化 x，0-1000"},"y":{"type":"integer","description":"归一化 y，0-1000"}}}}}"""
+
     /**
      * 故意不提供 home 工具：2026-09-17 实测 `input -d <虚拟屏id> keyevent 3` 不会停留在目标屏，
      * 会被系统路由到物理屏（display 0）的桌面 Launcher，直接违反"Agent 不抢占物理前台"的
      * 验收要求。`Action.Home` 本身保留，Injector 层构造即拒绝。
      */
-    fun systemPrompt(apps: List<AppEntry> = emptyList(), nowMs: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String = """
+    fun systemPrompt(
+        apps: List<AppEntry> = emptyList(),
+        nowMs: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
+        targetEnabled: Boolean = false,
+    ): String = """
         你是一个安卓手机操作助手。你会看到当前屏幕截图、一个可点/可读元素列表、以及一个任务目标，你要一步一步完成任务。
 
         现在是 ${TimeText.formatWithWeekday(nowMs, zone)}（设备本地时间）。
@@ -87,7 +102,7 @@ object PromptBuilder {
 
         规则：
         - 目标元素在列表里时，**优先用 tap 的 id 形态**，不要自己猜坐标。
-        - 目标不在列表里（图标、图片等）才用 tap 的 x/y 坐标兜底。
+        - ${if (targetEnabled) TAP_TARGET_RULE else TAP_XY_RULE}
         - 任务的所有部分都完成后调用 finish，summary 里写清结果和查到的信息；不要重复确认已经做过的事。
         - $EMPTY_START_RULE
         - 要输入文字时直接调用 type（文字会直接写进输入框）。这块屏幕上**永远不会弹出键盘**，不要点输入框等键盘、不要用 wait 等键盘。搜索类任务用 type 的 submit=true 一步完成输入和提交。
@@ -104,9 +119,9 @@ object PromptBuilder {
     }
 
     /** OpenAI 格式的 tools 声明。参数用归一化坐标，与 systemPrompt 一致。 */
-    fun toolsJson(): String = """
+    fun toolsJson(targetEnabled: Boolean = false): String = """
         [
-        {"type":"function","function":{"name":"tap","description":"点击。首选传 id（元素列表里的编号，最准）；目标不在列表里时才传 x/y 归一化坐标。","parameters":{"type":"object","properties":{"id":{"type":"integer","description":"元素列表里的 id"},"x":{"type":"integer","description":"归一化 x，0-1000"},"y":{"type":"integer","description":"归一化 y，0-1000"}}}}},
+        ${if (targetEnabled) TAP_TOOL_WITH_TARGET else TAP_TOOL},
         {"type":"function","function":{"name":"swipe","description":"从 (x1,y1) 滑到 (x2,y2)，归一化坐标。向上滑动查看下面的内容时 y1 大于 y2。","parameters":{"type":"object","properties":{"x1":{"type":"integer"},"y1":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"duration":{"type":"integer","description":"毫秒，默认 300"}},"required":["x1","y1","x2","y2"]}}},
         {"type":"function","function":{"name":"back","description":"返回上一页。","parameters":{"type":"object","properties":{}}}},
         {"type":"function","function":{"name":"open_app","description":"按名字打开一个 App。名字必须来自系统提示里的可用 App 列表。","parameters":{"type":"object","properties":{"name":{"type":"string","description":"App 的显示名，例如 时钟"}},"required":["name"]}}},
@@ -126,9 +141,9 @@ object PromptBuilder {
         ]
     """.trimIndent().replace("\n", "")
 
-    fun buildRequestBody(t: Transcript, zone: ZoneId = ZoneId.systemDefault()): String {
+    fun buildRequestBody(t: Transcript, zone: ZoneId = ZoneId.systemDefault(), targetEnabled: Boolean = false): String {
         val msgs = ArrayList<String>()
-        msgs += """{"role":"system","content":${jsonString(systemPrompt(t.apps, t.startedAtMs, zone))}}"""
+        msgs += """{"role":"system","content":${jsonString(systemPrompt(t.apps, t.startedAtMs, zone, targetEnabled))}}"""
         msgs += """{"role":"user","content":${jsonString("任务目标：${t.task}")}}"""
 
         val n = t.steps.size
@@ -156,7 +171,7 @@ object PromptBuilder {
         }
 
         return """{"model":${jsonString(t.model)},"messages":[${msgs.joinToString(",")}],""" +
-            """"tools":${toolsJson()},"temperature":0,"max_tokens":$MAX_TOKENS}"""
+            """"tools":${toolsJson(targetEnabled)},"temperature":0,"max_tokens":$MAX_TOKENS}"""
     }
 
     private fun observationMessage(step: Step, keepImage: Boolean, keepNodes: Boolean): String {

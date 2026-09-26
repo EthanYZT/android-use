@@ -312,4 +312,43 @@ class PromptBuilderTest {
         assertTrue(p, p.contains("不要拖滑块"))
         assertTrue(p, p.contains("短信验证码不算"))
     }
+
+    // ---- tap 的 target 形态（spec 2026-09-26 §2）----
+
+    @Test
+    fun withoutTargetThePromptAndToolsAreUnchanged() {
+        val p = PromptBuilder.systemPrompt()
+        assertTrue(p.contains("- 目标不在列表里（图标、图片等）才用 tap 的 x/y 坐标兜底。"))
+        assertFalse(p.contains("target"))
+        assertFalse(PromptBuilder.toolsJson().contains("\"target\""))
+        assertEquals(PromptBuilder.toolsJson(), PromptBuilder.toolsJson(targetEnabled = false))
+    }
+
+    @Test
+    fun withTargetTheRulesGoIdThenTargetThenXy() {
+        val p = PromptBuilder.systemPrompt(targetEnabled = true)
+        val id = p.indexOf("优先用 tap 的 id 形态")
+        val target = p.indexOf("用 tap 的 target 描述它")
+        val xy = p.indexOf("才用 tap 的 x/y 坐标兜底")
+        assertTrue("$id $target $xy", id in 0 until target && target < xy)
+        assertFalse(p.contains("目标不在列表里（图标、图片等）"))
+        // 插值不能破坏 trimIndent：没有残留缩进的规则行
+        assertFalse(p.contains("\n        -"))
+    }
+
+    @Test
+    fun withTargetTheTapToolDeclaresATargetString() {
+        val tools = MiniJson.parse(PromptBuilder.toolsJson(targetEnabled = true)) as List<*>
+        val tap = tools.map { (it as Map<*, *>)["function"] as Map<*, *> }.first { it["name"] == "tap" }
+        val props = (tap["parameters"] as Map<*, *>)["properties"] as Map<*, *>
+        assertEquals("string", (props["target"] as Map<*, *>)["type"])
+        assertEquals(setOf("id", "target", "x", "y"), props.keys)
+    }
+
+    @Test
+    fun requestBodyCarriesTheTargetFlag() {
+        val t = transcript(0)
+        assertTrue(PromptBuilder.buildRequestBody(t, targetEnabled = true).contains("\"target\""))
+        assertFalse(PromptBuilder.buildRequestBody(t).contains("\"target\""))
+    }
 }
