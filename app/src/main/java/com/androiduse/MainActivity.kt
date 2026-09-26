@@ -13,6 +13,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.androiduse.agent.AgentLoop
 import com.androiduse.perception.MlKitTextReader
 import com.androiduse.agent.ArkChatClient
+import com.androiduse.agent.JevClient
+import com.androiduse.agent.JevGrounder
 import com.androiduse.agent.Step
 import com.androiduse.agent.Transcript
 import com.androiduse.agent.TranscriptSink
@@ -151,7 +153,8 @@ class MainActivity : AppCompatActivity() {
                         store.outcome(t, finished, summary, handoff)
                 }
                 val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
-                val outcome = AgentLoop(client, AndroidEnvironment(screen, applicationContext, MlKitTextReader), BuildConfig.ARK_MODEL_ID, sink)
+                val grounder = BuildConfig.TYPESAFE_API_KEY.takeIf { it.isNotBlank() }?.let { JevGrounder(JevClient(it)) }
+                val outcome = AgentLoop(client, AndroidEnvironment(screen, applicationContext, MlKitTextReader), BuildConfig.ARK_MODEL_ID, sink, grounder)
                     .run(task, maxSteps = AgentLoop.UNLIMITED_STEPS) { line ->
                         Log.i("AgentLoop", line) // 镜像到 logcat，便于 adb 联调
                         runOnUiThread { binding.toolbar.subtitle = line.take(90) }

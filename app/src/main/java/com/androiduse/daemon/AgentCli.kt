@@ -3,6 +3,8 @@ package com.androiduse.daemon
 import com.androiduse.BuildConfig
 import com.androiduse.agent.AgentLoop
 import com.androiduse.agent.ArkChatClient
+import com.androiduse.agent.JevClient
+import com.androiduse.agent.JevGrounder
 import com.androiduse.AndroidEnvironment
 import com.androiduse.display.ScreenSessionCore
 import com.androiduse.log.TranscriptStore
@@ -40,12 +42,14 @@ object AgentCli {
         println("screen logicalId=${screen.logicalDisplayId} ${screen.widthPx}x${screen.heightPx} (headless)")
 
         val client = ArkChatClient(BuildConfig.ARK_API_KEY, BuildConfig.ARK_BASE_URL)
+        val grounder = BuildConfig.TYPESAFE_API_KEY.takeIf { it.isNotBlank() }?.let { JevGrounder(JevClient(it)) }
+        println("target 定位=${if (grounder == null) "未启用（无 typesafe.apiKey）" else "Jev"}")
         val store = TranscriptStore(File("/data/local/tmp/androiduse_transcripts"))
         try {
             val outcome = runBlocking {
                 // systemMain 的系统 Context 调 Provider 会被 SecurityException 拒绝（不是权限问题，pm grant 救不了）；
                 // providersAvailable=false 让日历/联系人工具直接给出明确失败文案，不去碰 ContentResolver。
-                AgentLoop(client, AndroidEnvironment(screen, ctx, providersAvailable = false), BuildConfig.ARK_MODEL_ID, store)
+                AgentLoop(client, AndroidEnvironment(screen, ctx, providersAvailable = false), BuildConfig.ARK_MODEL_ID, store, grounder)
                     .run(task, maxSteps = maxSteps) { println(it) }
             }
             println("RESULT: finished=${outcome.finished} handoff=${outcome.handoff} ${outcome.summary}")

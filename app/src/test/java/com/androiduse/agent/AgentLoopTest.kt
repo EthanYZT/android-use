@@ -77,11 +77,12 @@ class AgentLoopTest {
         env: FakeEnv = FakeEnv({ listOf(node(0, "返回"), node(7, "关于本机")) }),
         maxSteps: Int = 15,
         sink: FakeSink = FakeSink(),
+        grounder: Grounder? = null,
     ): Triple<AgentLoop.Outcome, FakeEnv, List<String>> {
         val sent = mutableListOf<String>()
         val queue = responses.toMutableList()
         val client = ArkChatClient("k", "u", transport = { body -> sent.add(body); ArkChatClient.HttpResult(200, queue.removeAt(0)) })
-        val loop = AgentLoop(client, env, "glm", sink)
+        val loop = AgentLoop(client, env, "glm", sink, grounder)
         val outcome = runBlocking { loop.run("看型号", maxSteps) { } }
         return Triple(outcome, env, sent)
     }
@@ -463,5 +464,91 @@ class AgentLoopTest {
         assertEquals(AgentLoop.NOT_EXECUTED_AFTER_FAILURE, s.executions[1].result)
         assertTrue(env.performed.isEmpty())
         assertTrue(sent[1].contains("READ_CALENDAR"))
+    }
+
+    private class FakeGrounder(private val answer: (String, List<NodeRecord>) -> LocateResult) : Grounder {
+        val calls = mutableListOf<Pair<String, List<NodeRecord>>>()
+        override fun locate(target: String, nodes: List<NodeRecord>, screenW: Int, screenH: Int): LocateResult {
+            calls += target to nodes
+            return answer(target, nodes)
+        }
+    }
+
+    @Test
+    fun targetTapIsLocatedThenInjectedAtTheNodeCenterAndReported() {
+        val g = FakeGrounder { _, nodes -> LocateResult.Located(nodes.first { it.id == 7 }, 0.97, 640) }
+        val (o, env, sent) = harness(
+            toolReply("列表里没有，按描述点", "tap" to """{"target":"关于本机那一行"}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            grounder = g,
+        )
+        assertTrue(o.finished)
+        assertEquals(listOf<Action>(Action.Tap(500, 375)), env.performed)
+        assertEquals("关于本机那一行", g.calls.single().first)
+        val ex = o.transcript.steps[0].executions.single()
+        assertTrue(ex.ok)
+        assertEquals("按描述定位到 #7 text=\"关于本机\"（置信 0.97，Jev 640ms），已点击", ex.result)
+        assertTrue(sent[0].contains("\"target\""))
+    }
+
+    @Test
+    fun rejectedTargetTapFailsFeedsTheReasonBackAndStopsTheBatch() {
+        val g = FakeGrounder { _, _ -> LocateResult.Rejected("没找到「搜索框」") }
+        val (o, env, sent) = harness(
+            toolReply("点搜索框再点关于", "tap" to """{"target":"搜索框"}""", "tap" to """{"id":7}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            grounder = g,
+        )
+        assertTrue(o.finished)
+        assertEquals(emptyList<Action>(), env.performed)
+        val ex = o.transcript.steps[0].executions
+        assertFalse(ex[0].ok)
+        assertEquals("没找到「搜索框」", ex[0].result)
+        assertTrue(ex[1].result.contains("未执行"))
+        assertTrue(sent[1].contains("没找到「搜索框」"))
+    }
+
+    @Test
+    fun batchedTargetTapIsLocatedInAFreshDump() {
+        val start = listOf(node(7, "关于本机"), node(0, "返回"))
+        val shifted = listOf(NodeRecord(8, 0, 800, 1000, 900, "去结算", "", "", "", true, false))
+        val env = FakeEnv({ start }, refresh = { shifted })
+        val g = FakeGrounder { _, nodes -> LocateResult.Located(nodes.first(), 0.9, 10) }
+        val (o, _, _) = harness(
+            toolReply("先点关于再结算", "tap" to """{"id":7}""", "tap" to """{"target":"去结算"}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            env = env, grounder = g,
+        )
+        assertTrue(o.finished)
+        assertEquals(shifted, g.calls.single().second)
+        assertEquals(listOf<Action>(Action.Tap(500, 375), Action.Tap(500, 425)), env.performed)
+        assertEquals(1, env.refreshCount)
+    }
+
+    @Test
+    fun batchedTargetTapWithoutRefreshSupportUsesTheStepStartTree() {
+        // Review Focus 4
+        val start = listOf(node(7, "关于本机"), node(0, "返回"))
+        val g = FakeGrounder { _, nodes -> LocateResult.Located(nodes.first { it.id == 0 }, 0.9, 10) }
+        val (o, env, _) = harness(
+            toolReply("连点", "tap" to """{"id":7}""", "tap" to """{"target":"返回"}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+            env = FakeEnv({ start }), grounder = g,
+        )
+        assertTrue(o.finished)
+        assertEquals(start, g.calls.single().second)
+        assertEquals(listOf<Action>(Action.Tap(500, 375), Action.Tap(500, 25)), env.performed)
+    }
+
+    @Test
+    fun withoutGrounderTargetIsAnErrorAndToolsDoNotOfferIt() {
+        val (o, env, sent) = harness(
+            toolReply("按描述点", "tap" to """{"target":"关于本机"}"""),
+            toolReply("完成", "finish" to """{"summary":"done"}"""),
+        )
+        assertTrue(o.finished)
+        assertEquals(emptyList<Action>(), env.performed)
+        assertTrue(o.transcript.steps[0].executions.single().result.contains("未启用"))
+        assertFalse(sent[0].contains("\"target\""))
     }
 }

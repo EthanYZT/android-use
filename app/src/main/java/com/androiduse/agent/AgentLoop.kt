@@ -19,6 +19,8 @@ class AgentLoop(
     private val env: Environment,
     private val model: String,
     private val sink: TranscriptSink = object : TranscriptSink {},
+    /** tap 的 target 形态（spec 2026-09-26）。null = 未配置 TypeSafe key，工具声明与提示词都不提供 target。 */
+    private val grounder: Grounder? = null,
 ) {
     /** 任务结束的方式：正常 finish、交接给人类、还是中止。 */
     enum class Kind { FINISHED, HANDOFF, ABORTED }
@@ -97,7 +99,7 @@ class AgentLoop(
             // 调模型；只给文字不给 tool call 时追问一次。
             var reply: ModelReply? = null
             for (attempt in 0..1) {
-                val body = PromptBuilder.buildRequestBody(t)
+                val body = PromptBuilder.buildRequestBody(t, targetEnabled = grounder != null)
                 val r = when (val res = client.chat(body)) {
                     is ArkChatClient.Result.Err -> return@withContext abort(t, step, t0, "模型请求失败: ${res.message}", onProgress)
                     is ArkChatClient.Result.Ok -> ModelReply(
@@ -128,14 +130,14 @@ class AgentLoop(
                 if (stopped != null) { step.executions += Execution(null, false, stopped, 0); continue }
                 if (ci >= MAX_CALLS_PER_STEP) { stopped = NOT_EXECUTED_OVER_CAP; step.executions += Execution(null, false, stopped, 0); continue }
                 executedCount++
-                // 批内第二个动作起，tap-by-id 先重新 dump 一次节点树按身份定位（前一个动作可能已让界面重排）。
-                val fresh = if (ci > 0 && call.name == "tap" && ResponseParser.intField(call.argumentsJson, "id") != null) env.refreshNodes() else null
+                // 批内第二个动作起，tap（id 或 target）先重新 dump 一次节点树（前一个动作可能已让界面重排）。
+                val fresh = if (ci > 0 && needsFreshTree(call)) env.refreshNodes() else null
                 // resolve/perform/performSystem 都是外部输入或设备调用，任何没预料到的异常
                 // （比如 Environment 实现里的 bug）不能让整个任务中止：兜成一次失败的 Execution，
                 // 文本回给模型，循环继续。CancellationException 例外——那是外层 cancel() 的信号，
                 // 必须往上抛，不能被这里吞掉。
                 val exec = try {
-                    when (val res = ToolCallResolver.resolve(call, obs.nodes, env.screenW, env.screenH, t.apps, fresh)) {
+                    when (val res = ToolCallResolver.resolve(call, obs.nodes, env.screenW, env.screenH, t.apps, fresh, targetEnabled = grounder != null)) {
                         is ToolCallResolver.Resolution.Err -> Execution(null, false, res.message, System.currentTimeMillis() - c0)
                         is ToolCallResolver.Resolution.Ok -> {
                             val action = res.action
@@ -153,6 +155,8 @@ class AgentLoop(
                                     val r = env.performSystem(action.call)
                                     Execution(action, r.ok, r.text, System.currentTimeMillis() - c0)
                                 }
+                                // 按描述点击：在全量节点（批内用刷新后的树）里定位成普通 Tap 再注入。
+                                is Action.TapTarget -> tapTarget(action, fresh ?: obs.nodes, c0)
                                 else -> {
                                     val ok = env.perform(action)
                                     Execution(action, ok, if (ok) "ok" else (env.lastError() ?: "注入失败"), System.currentTimeMillis() - c0)
@@ -205,6 +209,31 @@ class AgentLoop(
 
         val lastNote = t.steps.lastOrNull()?.replies?.lastOrNull()?.note.orEmpty()
         Outcome(false, "达到最大步数 $maxSteps，未收到 finish，已中止。最后笔记：$lastNote", t)
+    }
+
+    private fun needsFreshTree(call: ToolCall): Boolean =
+        call.name == "tap" && (
+            ResponseParser.intField(call.argumentsJson, "id") != null ||
+                (grounder != null && ToolCallResolver.targetOf(call.argumentsJson) != null)
+            )
+
+    private fun tapTarget(action: Action.TapTarget, nodes: List<com.androiduse.daemon.DumpCodec.NodeRecord>, c0: Long): Execution {
+        val g = grounder
+            ?: return Execution(null, false, "tap 的 target 形态未启用，请用 id 或 x/y 坐标", System.currentTimeMillis() - c0)
+        return when (val r = g.locate(action.target, nodes, env.screenW, env.screenH)) {
+            is LocateResult.Rejected -> Execution(null, false, r.message, System.currentTimeMillis() - c0)
+            is LocateResult.Located -> {
+                val c = NodeGrounding.centerNorm(r.node, env.screenW, env.screenH)
+                    ?: return Execution(null, false, "定位到的 #${r.node.id} 没有有效位置，请改用 x/y 坐标", System.currentTimeMillis() - c0)
+                val tap = Action.Tap(c.first, c.second)
+                val ok = env.perform(tap)
+                Execution(
+                    tap, ok,
+                    if (ok) TargetLocator.locatedMessage(r.node, r.confidence, r.latencyMs) else (env.lastError() ?: "注入失败"),
+                    System.currentTimeMillis() - c0,
+                )
+            }
+        }
     }
 
     private fun abort(t: Transcript, step: Step, t0: Long, reason: String, onProgress: (String) -> Unit): Outcome {
