@@ -520,11 +520,12 @@ fn preflight(action, expected_context) -> Decision:
 ### 阶段 2：能力路由（系统接口 + MCP）
 - **目标**：优先走协议。接入闹钟/日历/短信/设置/地图/电话等系统接口；接入 1–2 个 MCP 服务。
 - **验收**：日历改期、发短信、设闹钟、导航等任务走系统接口完成，不经过 GUI。
-- **2a 系统接口（2026-09-18，分支 `stage2a-system-interfaces`，未合并）**：九个工具（闹钟/日历查建改/联系人/短信编辑/拨号/导航/设置页）软路由接入，实现与单测完成；真机验收通过：短信跳板泄漏已修（已知跳板改直起会话页 + 每次 Intent 启动后核对落屏，泄漏即撤回报失败），③/dial 复验落虚拟屏；AgentCli 不能用 Provider 类工具（产品路径是 App 进程）。见 spec `superpowers/specs/2026-09-18-2a-system-interfaces-design.md` §7、§7.1。2b MCP 待做。
+- **2a 系统接口（2026-09-18，已合并 main）**：九个工具（闹钟/日历查建改/联系人/短信编辑/拨号/导航/设置页）软路由接入，实现与单测完成；真机验收通过：短信跳板泄漏已修（已知跳板改直起会话页 + 每次 Intent 启动后核对落屏，泄漏即撤回报失败），③/dial 复验落虚拟屏；AgentCli 不能用 Provider 类工具（产品路径是 App 进程）。见 spec `superpowers/specs/2026-09-18-2a-system-interfaces-design.md` §7、§7.1。2b MCP 待做。
 - **交接与接管（2026-09-18）**：`handoff` 工具（付款/提交订单/结算确认、滑块/选图类人机验证时停下）+ 结束卡片"在手机上继续"（`am display move-stack` 把虚拟屏任务从底到顶搬到物理屏，顶层任务在前台，其余落后台，然后销毁空虚拟屏）。同日修了提示词元素列表选取（优先级+分段配额，不再按树顺序截 60 条）。验收见 spec `superpowers/specs/2026-09-18-handoff-takeover-design.md` §8。
 - **后台运行（2026-09-18）**：App 切后台 5 秒即被 ColorOS HANS 冻结（`freeze uid … StrictMode-3`）并拉进网络黑名单，模型请求挂死、切回前台时以 connection abort / Unable to resolve host 中止。修：任务期间起 `AgentForegroundService`（specialUse 前台服务）+ 任务开始时 `BackgroundExemption` 用 root `dumpsys deviceidle whitelist +包名` 自加 Doze 白名单。真机验证：只有前台服务不够（照冻）；加白名单后降到 StrictMode-1——不再断网，冻结会被到达的网络包解冻，多步任务在后台跑完。appops RUN_ANY_IN_BACKGROUND 无效；`/data/oplus/os/bpm/bpm.xml` 的 `<gs>` 名单改了不重启不生效（未验证重启）。
 - **开局空屏（2026-09-18）**：建虚拟屏后不再预开设置页（1e 之前为避免空黑屏/镜像的过渡做法）。模型第一步看到黑屏+空列表，提示词 `EMPTY_START_RULE` 说明这是正常空屏、直接 open_app/专用工具而不是 wait；观察消息区分"读取不到"与"屏幕为空"。真机：开局 0 元素，模型第一步直接 open_app 时钟，2 步完成。
 - **不限步数 + 系统通知提醒（2026-09-18）**：App 内任务不限步数（`AgentLoop.UNLIMITED_STEPS`，剩余刹车：连续 3 步失败、连续 3 步画面动作相同、手动停止）。`ui/TaskAlerts`（纯）+ `ui/TaskNotifier`：每满 20 步横幅提醒（带"停止任务"按钮）、交接横幅（带"在手机上继续"按钮，一键接管）、完成/中止普通通知；按钮经 MainActivity 的 `stop`/`takeover` extra 处理。坑：刚装完 APK 后 ProfileInstaller 触发一次 Package REPLACED，系统会清掉该 App 已发的通知——只在装包后第一次出现。
+- **按描述定位（2026-09-26）**：`tap` 增加 `target` 形态——规划器描述要点的元素，由 TypeSafe **Jev**（System One 结构化判断模型）在全量节点里 Choice 选 id（exists Noul + confidence 双门控，同一可点元素的候选概率先合并，>250 候选分块两轮），解决密页面关键按钮被截出 80 条提示词列表的问题。未配置 `typesafe.apiKey` 时整体关闭。验收：回放 20/21 点中、0 点错、不存在 3/3 拒绝；E2E 3/3（含高德 874 节点详情页点"导航"）；5 App 回归 10/10。机上定位中位 1.5 s（略超目标）。见 spec `superpowers/specs/2026-09-26-jev-target-grounding-design.md` §7。
 
 ### 阶段 3：GUI 兜底 + 安全网关
 - **目标**：GUI 覆盖任意 App；安全网关全量生效。
