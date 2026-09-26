@@ -130,14 +130,13 @@ object TargetLocator {
             }
             return Verdict.NeedsSecondPass(finalists)
         }
-        return decide(t, choices[0], byId, ranked)
+        return decide(t, choices[0], cands)
     }
 
     fun interpretSecond(target: String, finalists: List<Candidate>, answers: Map<String, JevClient.Answer>): Verdict {
         val t = UntrustedText.sanitize(target)
-        val byId = finalists.associateBy { it.node.id.toString() }
         val choice = answers["where"] as? JevClient.Answer.Choice ?: return Verdict.Rejected(unavailable("响应缺少 where"))
-        return decide(t, choice, byId, rank(listOf(choice), byId))
+        return decide(t, choice, finalists)
     }
 
     private fun rank(choices: List<JevClient.Answer.Choice>, byId: Map<String, Candidate>): List<Pair<Candidate, Double>> =
@@ -145,12 +144,53 @@ object TargetLocator {
             .mapNotNull { (k, p) -> byId[k]?.let { it to p } }
             .sortedByDescending { it.second }
 
-    private fun decide(t: String, choice: JevClient.Answer.Choice, byId: Map<String, Candidate>, ranked: List<Pair<Candidate, Double>>): Verdict {
-        val picked = byId[choice.choice]
-            ?: return Verdict.Rejected(unavailable("返回了不在候选里的编号 ${UntrustedText.sanitize(choice.choice)}"))
-        if (choice.confidence < CONFIDENCE_MIN) return Verdict.Rejected(uncertain(t, ranked))
-        return Verdict.Located(picked, choice.confidence)
+    /**
+     * 按"同一可点元素"合并后的分布判定：胜者是合并后概率最高的可点元素，confidence 用 Jev 的公式
+     * `(n·peak − 1)/(n − 1)` 在合并后的分布上重算（n 仍是本题选项数；没有合并时与 Jev 给的一致）。
+     */
+    private fun decide(t: String, choice: JevClient.Answer.Choice, cands: List<Candidate>): Verdict {
+        if (cands.none { it.node.id.toString() == choice.choice }) {
+            return Verdict.Rejected(unavailable("返回了不在候选里的编号 ${UntrustedText.sanitize(choice.choice)}"))
+        }
+        val merged = merge(choice, cands)
+        val (top, peak) = merged.firstOrNull() ?: return Verdict.Rejected(unavailable("where 没有有效概率"))
+        val confidence = confidenceOf(peak, choice.probabilities.size)
+        if (confidence < CONFIDENCE_MIN) return Verdict.Rejected(uncertain(t, merged))
+        return Verdict.Located(top, confidence)
     }
+
+    /**
+     * 可点容器与它里面的文字/图标子节点在 Choice 里会分摊概率——2026-09-26 回放：京东搜索栏 0.58/0.28/0.10
+     * 分给了 desc、文字、容器三条，单看哪条都不够 0.6，合起来 0.96。每个候选归到"**完整包含**它的
+     * **最小**可点/可输入候选"（找不到就归自己），按组求和、降序。子按钮本身可点时归它自己，不会被并进整张卡片。
+     * 必须完整包含而不是只看中心：浮层下被盖住的邻居（京东品牌浮层下的"秒杀"）会与文字部分重叠，
+     * 只看中心会把"华为"并进"秒杀"——同一回放里实际发生过。
+     */
+    private fun merge(choice: JevClient.Answer.Choice, cands: List<Candidate>): List<Pair<Candidate, Double>> {
+        val byId = cands.associateBy { it.node.id.toString() }
+        val sums = LinkedHashMap<Candidate, Double>()
+        for ((k, p) in choice.probabilities) {
+            val c = byId[k] ?: continue
+            val owner = ownerOf(c, cands)
+            sums[owner] = (sums[owner] ?: 0.0) + p
+        }
+        return sums.entries.map { it.key to it.value }.sortedByDescending { it.second }
+    }
+
+    private fun ownerOf(c: Candidate, cands: List<Candidate>): Candidate {
+        val n = c.node
+        return cands
+            .filter {
+                val o = it.node
+                (o.clickable || o.editable) && o.left <= n.left && o.top <= n.top && o.right >= n.right && o.bottom >= n.bottom
+            }
+            .minByOrNull { (it.node.right - it.node.left).toLong() * (it.node.bottom - it.node.top) }
+            ?: c
+    }
+
+    /** TypeSafe 文档里 Choice confidence 的定义：(n·peak − 1)/(n − 1)，夹到 [0,1]；只有一个选项时为 1。 */
+    internal fun confidenceOf(peak: Double, n: Int): Double =
+        if (n <= 1) 1.0 else ((n * peak - 1) / (n - 1)).coerceIn(0.0, 1.0)
 
     private fun p(v: Double) = String.format(Locale.ROOT, "%.2f", v)
 

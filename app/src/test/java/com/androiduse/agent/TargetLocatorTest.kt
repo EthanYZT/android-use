@@ -199,4 +199,60 @@ class TargetLocatorTest {
             java.util.Locale.setDefault(saved)
         }
     }
+
+    // ---- 同一可点元素的候选合并（2026-09-26 回放后加）----
+
+    @Test
+    fun probabilitySplitAcrossACardAndItsLabelsIsMergedAndTapsTheCard() {
+        // 回放实例：京东"¥3489 那台手机"——3489 0.37、国补 0.22、卡片 0.09，单看都不够 0.6。
+        val card = node(150, 300, 1100, 520, 1300)                                   // 可点卡片
+        val price = node(153, 350, 1180, 480, 1220, text = "3489", click = false)     // 卡片里的文字
+        val tag = node(151, 320, 1140, 420, 1170, text = "国补", click = false)
+        val other = node(13, 600, 1100, 820, 1300, text = "1172.15")
+        val c = TargetLocator.candidates(listOf(card, price, tag, other), w, h)
+        val v = TargetLocator.interpretFirst("¥3489 的那台手机", c, mapOf(
+            "where" to choice("153", mapOf("153" to 0.5, "151" to 0.3, "150" to 0.1, "13" to 0.1), 0.2),
+            "exists" to noul(0.9),
+        ))
+        val loc = v as TargetLocator.Verdict.Located
+        assertEquals(150, loc.candidate.node.id)
+        // 合并后峰值 0.9，n=4：(4×0.9−1)/3
+        assertEquals((4 * 0.9 - 1) / 3, loc.confidence, 1e-9)
+    }
+
+    @Test
+    fun aClickableChildButtonIsNotMergedIntoItsCard() {
+        val card = node(160, 0, 1000, 500, 1400)
+        val title = node(163, 50, 1050, 450, 1100, text = "努比亚 NaviX", click = false)
+        val addToCart = node(166, 400, 1300, 480, 1380, desc = "加入购物车按钮")
+        val c = TargetLocator.candidates(listOf(card, title, addToCart), w, h)
+        val v = TargetLocator.interpretFirst("加入购物车", c, mapOf(
+            "where" to choice("166", mapOf("166" to 0.6, "163" to 0.3, "160" to 0.1), 0.4),
+            "exists" to noul(0.9),
+        ))
+        // 按钮 0.6 归自己；标题 0.3 归卡片 → 卡片 0.4。峰值 0.6、n=3 → 0.4 < 0.6，不确定，不点。
+        val msg = (v as TargetLocator.Verdict.Rejected).message
+        assertTrue(msg, msg.contains("#166 desc=\"加入购物车按钮\" 0.60；#160 0.40"))
+    }
+
+    @Test
+    fun confidenceFollowsJevsFormulaWhenNothingMerges() {
+        val v = TargetLocator.interpretFirst("选规格", two, mapOf("where" to choice("13", mapOf("13" to 0.8, "12" to 0.2), 0.99), "exists" to noul(0.9)))
+        assertEquals(2 * 0.8 - 1, (v as TargetLocator.Verdict.Located).confidence, 1e-9)
+    }
+
+    @Test
+    fun aLabelIsNotMergedIntoAnOverlappingNeighbourThatOnlyPartlyCoversIt() {
+        // 2026-09-26 回放 WRONG：京东品牌浮层下被盖住的"秒杀" #58 与"华为"文字 #125 部分重叠、面积还略小，
+        // 按"中心落在最小可点元素里"会把华为并进秒杀。真实像素 bounds。
+        val miaosha = node(58, 0, 802, 190, 965)
+        val huaweiCell = node(124, 23, 687, 227, 839)
+        val huaweiText = node(125, 24, 796, 226, 839, text = "华为", click = false)
+        val c = TargetLocator.candidates(listOf(miaosha, huaweiCell, huaweiText), 1080, 2376)
+        val v = TargetLocator.interpretFirst("品牌列表里的'华为'", c, mapOf(
+            "where" to choice("125", mapOf("125" to 0.9, "58" to 0.05, "124" to 0.05), 0.85),
+            "exists" to noul(0.95),
+        ))
+        assertEquals(124, (v as TargetLocator.Verdict.Located).candidate.node.id)
+    }
 }

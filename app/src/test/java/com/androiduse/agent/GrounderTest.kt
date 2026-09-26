@@ -37,7 +37,7 @@ class GrounderTest {
         val (g, sent) = grounder(resp(where("where", "13", "\"13\":0.97,\"12\":0.03", 0.95), exists(0.98)))
         val r = g.locate("选规格", nodes, w, h) as LocateResult.Located
         assertEquals(13, r.node.id)
-        assertEquals(0.95, r.confidence, 1e-9)
+        assertEquals(2 * 0.97 - 1, r.confidence, 1e-9) // 由分布重算（合并后的口径），不是直接取 Jev 的 confidence
         assertEquals(1, sent.size)
     }
 
