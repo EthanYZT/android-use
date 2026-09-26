@@ -27,9 +27,17 @@ class LocateReplayTest {
             return Case(f[0].trim(), sw, sh, expected, target)
         }
 
-        /** HIT 点中预期；WRONG 点了别的（最坏）；REJECT 该点没点；CORRECT_REJECT 不存在且拒绝了。 */
-        fun grade(expectedId: Int?, r: LocateResult): String = when (r) {
-            is LocateResult.Located -> if (expectedId != null && r.node.id == expectedId) "HIT" else "WRONG"
+        /**
+         * HIT 点中预期；WRONG 点了别的（最坏）；REJECT 该点没点；CORRECT_REJECT 不存在且拒绝了。
+         * 期望写可点容器：定位到的节点中心落在它范围内就算点中（容器里的文字子节点点下去是同一个按钮）。
+         */
+        fun grade(expectedId: Int?, r: LocateResult, nodes: List<DumpCodec.NodeRecord>): String = when (r) {
+            is LocateResult.Located -> {
+                val e = nodes.firstOrNull { it.id == expectedId }
+                val cx = (r.node.left + r.node.right) / 2; val cy = (r.node.top + r.node.bottom) / 2
+                val inside = e != null && cx >= e.left && cx < e.right && cy >= e.top && cy < e.bottom
+                if (expectedId != null && (r.node.id == expectedId || inside)) "HIT" else "WRONG"
+            }
             is LocateResult.Rejected -> if (expectedId == null) "CORRECT_REJECT" else "REJECT"
         }
     }
@@ -44,13 +52,23 @@ class LocateReplayTest {
     }
 
     @Test
+    fun locatingALabelInsideTheExpectedContainerIsAHit() {
+        // 可点容器 #179（底栏"订单"格子）与其文字子节点 #178：点哪个中心都点中同一个按钮。
+        val container = DumpCodec.NodeRecord(179, 540, 2200, 810, 2260, "", "", "", "", true, false)
+        val label = DumpCodec.NodeRecord(178, 640, 2210, 710, 2225, "订单", "", "", "", false, false)
+        val nodes = listOf(container, label)
+        assertEquals("HIT", grade(179, LocateResult.Located(label, 0.9, 1), nodes))
+        assertEquals("WRONG", grade(178, LocateResult.Located(container, 0.9, 1), nodes))
+    }
+
+    @Test
     fun gradesEveryOutcome() {
         val n = DumpCodec.NodeRecord(27, 0, 0, 1, 1, "", "", "", "", true, false)
-        assertEquals("HIT", grade(27, LocateResult.Located(n, 0.9, 1)))
-        assertEquals("WRONG", grade(5, LocateResult.Located(n, 0.9, 1)))
-        assertEquals("WRONG", grade(null, LocateResult.Located(n, 0.9, 1)))
-        assertEquals("REJECT", grade(27, LocateResult.Rejected("x")))
-        assertEquals("CORRECT_REJECT", grade(null, LocateResult.Rejected("x")))
+        assertEquals("HIT", grade(27, LocateResult.Located(n, 0.9, 1), listOf(n)))
+        assertEquals("WRONG", grade(5, LocateResult.Located(n, 0.9, 1), listOf(n)))
+        assertEquals("WRONG", grade(null, LocateResult.Located(n, 0.9, 1), listOf(n)))
+        assertEquals("REJECT", grade(27, LocateResult.Rejected("x"), listOf(n)))
+        assertEquals("CORRECT_REJECT", grade(null, LocateResult.Rejected("x"), listOf(n)))
     }
 
     @Test
@@ -68,7 +86,7 @@ class LocateReplayTest {
             val t0 = System.currentTimeMillis()
             val r = grounder.locate(c.target, nodes, c.screenW, c.screenH)
             latencies += System.currentTimeMillis() - t0
-            val g = grade(c.expectedId, r)
+            val g = grade(c.expectedId, r, nodes)
             tally[g] = (tally[g] ?: 0) + 1
             val detail = when (r) {
                 is LocateResult.Located -> "#${r.node.id} conf=${"%.2f".format(java.util.Locale.ROOT, r.confidence)}"
