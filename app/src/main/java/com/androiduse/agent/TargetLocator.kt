@@ -1,6 +1,7 @@
 package com.androiduse.agent
 
 import com.androiduse.daemon.DumpCodec.NodeRecord
+import java.util.Locale
 
 /**
  * tap 的 target 形态：把"按描述找元素"变成 Jev 能答的问题，再把答案判成"点 / 不点"。**纯逻辑**，不碰网络。
@@ -105,4 +106,65 @@ object TargetLocator {
         val t = UntrustedText.sanitize(target)
         return JevRequest(state(finalists), "{\"where\":" + where(t, finalists) + "}")
     }
+
+    sealed class Verdict {
+        data class Located(val candidate: Candidate, val confidence: Double) : Verdict()
+        /** message 直接作为 tool 结果回给规划器。 */
+        data class Rejected(val message: String) : Verdict()
+        data class NeedsSecondPass(val finalists: List<Candidate>) : Verdict()
+    }
+
+    fun interpretFirst(target: String, cands: List<Candidate>, answers: Map<String, JevClient.Answer>): Verdict {
+        val t = UntrustedText.sanitize(target)
+        val exists = (answers["exists"] as? JevClient.Answer.Noul)?.value
+            ?: return Verdict.Rejected(unavailable("响应缺少 exists"))
+        val byId = cands.associateBy { it.node.id.toString() }
+        val chunkCount = (cands.size + CHUNK_SIZE - 1) / CHUNK_SIZE
+        val keys = if (chunkCount == 1) listOf("where") else (0 until chunkCount).map { "where_$it" }
+        val choices = keys.map { answers[it] as? JevClient.Answer.Choice ?: return Verdict.Rejected(unavailable("响应缺少 $it")) }
+        val ranked = rank(choices, byId)
+        if (exists < EXISTS_MIN) return Verdict.Rejected(notFound(t, exists, ranked))
+        if (chunkCount > 1) {
+            val finalists = choices.flatMap { ch ->
+                ch.probabilities.entries.sortedByDescending { it.value }.take(PER_CHUNK_KEEP).mapNotNull { byId[it.key] }
+            }
+            return Verdict.NeedsSecondPass(finalists)
+        }
+        return decide(t, choices[0], byId, ranked)
+    }
+
+    fun interpretSecond(target: String, finalists: List<Candidate>, answers: Map<String, JevClient.Answer>): Verdict {
+        val t = UntrustedText.sanitize(target)
+        val byId = finalists.associateBy { it.node.id.toString() }
+        val choice = answers["where"] as? JevClient.Answer.Choice ?: return Verdict.Rejected(unavailable("响应缺少 where"))
+        return decide(t, choice, byId, rank(listOf(choice), byId))
+    }
+
+    private fun rank(choices: List<JevClient.Answer.Choice>, byId: Map<String, Candidate>): List<Pair<Candidate, Double>> =
+        choices.flatMap { it.probabilities.entries }
+            .mapNotNull { (k, p) -> byId[k]?.let { it to p } }
+            .sortedByDescending { it.second }
+
+    private fun decide(t: String, choice: JevClient.Answer.Choice, byId: Map<String, Candidate>, ranked: List<Pair<Candidate, Double>>): Verdict {
+        val picked = byId[choice.choice]
+            ?: return Verdict.Rejected(unavailable("返回了不在候选里的编号 ${UntrustedText.sanitize(choice.choice)}"))
+        if (choice.confidence < CONFIDENCE_MIN) return Verdict.Rejected(uncertain(t, ranked))
+        return Verdict.Located(picked, choice.confidence)
+    }
+
+    private fun p(v: Double) = String.format(Locale.ROOT, "%.2f", v)
+
+    private fun top3(ranked: List<Pair<Candidate, Double>>): String =
+        ranked.take(3).joinToString("；") { "${label(it.first.node)} ${p(it.second)}" }.ifEmpty { "无" }
+
+    private fun notFound(t: String, exists: Double, ranked: List<Pair<Candidate, Double>>) =
+        "没找到「$t」（存在概率 ${p(exists)}）。最接近的：${top3(ranked)}。可能是图片/图标，请用 x/y"
+
+    private fun uncertain(t: String, ranked: List<Pair<Candidate, Double>>) =
+        "不确定「$t」是哪个：${top3(ranked)}。请用 id 指定，或写得更具体（文字、哪一行、屏幕哪部分）"
+
+    fun unavailable(reason: String) = "按描述定位暂不可用（$reason），请改用 id 或 x/y"
+
+    fun locatedMessage(n: NodeRecord, confidence: Double, latencyMs: Long) =
+        "按描述定位到 ${label(n)}（置信 ${p(confidence)}，Jev ${latencyMs}ms），已点击"
 }

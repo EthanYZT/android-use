@@ -114,4 +114,89 @@ class TargetLocatorTest {
         assertEquals(setOf("where"), q.keys)
         assertEquals(setOf("2", "4"), ((q["where"] as Map<*, *>)["criteria"] as Map<*, *>).keys)
     }
+
+    // ---- Task 3：判定与文案 ----
+
+    private val two by lazy {
+        TargetLocator.candidates(listOf(node(12, 0, 900, 500, 1000, text = "生椰拿铁"), node(13, 600, 900, 1000, 1000, text = "选规格")), w, h)
+    }
+
+    private fun choice(choice: String, probs: Map<String, Double>, conf: Double) = JevClient.Answer.Choice(choice, probs, conf)
+    private fun noul(v: Double) = JevClient.Answer.Noul(v)
+
+    @Test
+    fun confidentExistingChoiceIsLocated() {
+        val v = TargetLocator.interpretFirst("选规格", two, mapOf("where" to choice("13", mapOf("13" to 0.97, "12" to 0.03), 0.94), "exists" to noul(0.98)))
+        val loc = v as TargetLocator.Verdict.Located
+        assertEquals(13, loc.candidate.node.id)
+        assertEquals(0.94, loc.confidence, 1e-9)
+    }
+
+    @Test
+    fun lowExistsIsRejectedAsNotFoundWithClosestCandidates() {
+        val v = TargetLocator.interpretFirst("搜索框", two, mapOf("where" to choice("12", mapOf("12" to 0.6, "13" to 0.4), 0.2), "exists" to noul(0.12)))
+        val msg = (v as TargetLocator.Verdict.Rejected).message
+        assertEquals("没找到「搜索框」（存在概率 0.12）。最接近的：#12 text=\"生椰拿铁\" 0.60；#13 text=\"选规格\" 0.40。可能是图片/图标，请用 x/y", msg)
+    }
+
+    @Test
+    fun lowConfidenceIsRejectedAsUncertain() {
+        val v = TargetLocator.interpretFirst("那个", two, mapOf("where" to choice("12", mapOf("12" to 0.52, "13" to 0.48), 0.04), "exists" to noul(0.9)))
+        val msg = (v as TargetLocator.Verdict.Rejected).message
+        assertEquals("不确定「那个」是哪个：#12 text=\"生椰拿铁\" 0.52；#13 text=\"选规格\" 0.48。请用 id 指定，或写得更具体（文字、哪一行、屏幕哪部分）", msg)
+    }
+
+    @Test
+    fun missingAnswersMakeLocatingUnavailable() {
+        val v = TargetLocator.interpretFirst("选规格", two, mapOf("where" to choice("13", mapOf("13" to 1.0), 1.0)))
+        assertTrue((v as TargetLocator.Verdict.Rejected).message.startsWith("按描述定位暂不可用（"))
+    }
+
+    @Test
+    fun choiceOutsideCandidatesIsRejected() {
+        // Review Focus 5
+        val v = TargetLocator.interpretFirst("选规格", two, mapOf("where" to choice("99", mapOf("99" to 1.0), 1.0), "exists" to noul(0.9)))
+        val msg = (v as TargetLocator.Verdict.Rejected).message
+        assertTrue(msg, msg.contains("99") && msg.contains("不在候选里"))
+    }
+
+    @Test
+    fun chunkedFirstPassKeepsTopTwoPerChunkForTheSecondPass() {
+        val nodes = (0 until TargetLocator.CHUNK_SIZE + 3).map { node(it, 0, it * 7, 1000, it * 7 + 5, text = "项$it") }
+        val c = TargetLocator.candidates(nodes, w, h)
+        val answers = mapOf(
+            "where_0" to choice("5", mapOf("5" to 0.7, "9" to 0.2, "1" to 0.1), 0.5),
+            "where_1" to choice("251", mapOf("251" to 0.5, "252" to 0.3, "250" to 0.2), 0.2),
+            "exists" to noul(0.9),
+        )
+        val v = TargetLocator.interpretFirst("项5", c, answers) as TargetLocator.Verdict.NeedsSecondPass
+        assertEquals(listOf(5, 9, 251, 252), v.finalists.map { it.node.id })
+    }
+
+    @Test
+    fun chunkedFirstPassWithLowExistsIsRejectedImmediately() {
+        val nodes = (0 until TargetLocator.CHUNK_SIZE + 1).map { node(it, 0, it * 7, 1000, it * 7 + 5, text = "项$it") }
+        val c = TargetLocator.candidates(nodes, w, h)
+        val answers = mapOf("where_0" to choice("5", mapOf("5" to 1.0), 1.0), "where_1" to choice("250", mapOf("250" to 1.0), 1.0), "exists" to noul(0.1))
+        assertTrue((TargetLocator.interpretFirst("x", c, answers) as TargetLocator.Verdict.Rejected).message.startsWith("没找到「x」"))
+    }
+
+    @Test
+    fun secondPassAppliesTheConfidenceGate() {
+        val f = two
+        assertEquals(13, (TargetLocator.interpretSecond("选规格", f, mapOf("where" to choice("13", mapOf("13" to 0.9, "12" to 0.1), 0.8))) as TargetLocator.Verdict.Located).candidate.node.id)
+        assertTrue(TargetLocator.interpretSecond("选规格", f, mapOf("where" to choice("13", mapOf("13" to 0.55, "12" to 0.45), 0.1))) is TargetLocator.Verdict.Rejected)
+    }
+
+    @Test
+    fun messagesUseDotDecimalsRegardlessOfDefaultLocale() {
+        // Review Focus 3
+        val saved = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.GERMANY)
+            assertEquals("按描述定位到 #13 text=\"选规格\"（置信 0.97，Jev 640ms），已点击", TargetLocator.locatedMessage(two[1].node, 0.97, 640))
+        } finally {
+            java.util.Locale.setDefault(saved)
+        }
+    }
 }
