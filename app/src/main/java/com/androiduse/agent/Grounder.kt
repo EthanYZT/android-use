@@ -32,12 +32,12 @@ class JevGrounder(private val client: JevClient) : Grounder {
         var verdict = TargetLocator.interpretFirst(target, cands, answers1)
         if (verdict is TargetLocator.Verdict.NeedsSecondPass) {
             val finalists = verdict.finalists
-            val req2 = TargetLocator.secondRequest(target, finalists)
+            val req2 = TargetLocator.secondRequest(target, cands, finalists)
             val answers2 = when (val r = client.evaluate(req2.stateJson, req2.questionsJson)) {
                 is JevClient.Result.Err -> return LocateResult.Rejected(TargetLocator.unavailable(r.message))
                 is JevClient.Result.Ok -> r.answers
             }
-            verdict = TargetLocator.interpretSecond(target, finalists, answers2)
+            verdict = TargetLocator.interpretSecond(target, cands, finalists, answers2)
         }
         return when (verdict) {
             is TargetLocator.Verdict.Located -> LocateResult.Located(verdict.candidate.node, verdict.confidence, System.currentTimeMillis() - t0)

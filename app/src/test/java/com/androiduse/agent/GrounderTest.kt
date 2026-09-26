@@ -52,6 +52,7 @@ class GrounderTest {
         assertEquals(5, r.node.id)
         assertEquals(2, sent.size)
         val second = MiniJson.parse(sent[1]) as Map<*, *>
+        assertEquals(TargetLocator.CHUNK_SIZE + 1, ((second["state"] as Map<*, *>)["elements"] as List<*>).size)
         assertEquals(setOf("5", "6", "250"), (((second["questions"] as Map<*, *>)["where"] as Map<*, *>)["criteria"] as Map<*, *>).keys)
     }
 

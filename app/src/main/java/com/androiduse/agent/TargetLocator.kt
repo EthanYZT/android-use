@@ -21,10 +21,16 @@ object TargetLocator {
     const val CHUNK_SIZE = 250
     /** 分块时每块进第二轮的名额。 */
     const val PER_CHUNK_KEEP = 2
+    /**
+     * 能当合并容器的元素面积上限（占屏幕比例）。全屏可点根节点/透明遮罩会完整包含页面上所有文字，
+     * 并进去就会把不同元素的概率加在一起（终审 Important 1）。商品卡片等真实容器远小于 25%。
+     */
+    const val MAX_OWNER_AREA_FRACTION = 0.25
 
     const val EMPTY_MESSAGE = "屏幕上没有可定位的元素，请用 x/y"
 
-    data class Candidate(val node: NodeRecord, val xn: Int, val yn: Int, val line: String)
+    /** [canOwn]：可点/可输入且面积不超过 [MAX_OWNER_AREA_FRACTION]，可作为合并容器。 */
+    data class Candidate(val node: NodeRecord, val xn: Int, val yn: Int, val line: String, val canOwn: Boolean = false)
     data class JevRequest(val stateJson: String, val questionsJson: String)
 
     fun region(xn: Int, yn: Int): String {
@@ -45,7 +51,9 @@ object TargetLocator {
             val labeled = n.text.isNotEmpty() || n.desc.isNotEmpty()
             if (!n.clickable && !n.editable && !labeled) continue
             if (!labeled && !n.editable && !seenBlankCenters.add(c.first.toLong() * 10_000 + c.second)) continue
-            out += Candidate(n, c.first, c.second, line(n, c.first, c.second))
+            val area = (n.right - n.left).toLong() * (n.bottom - n.top)
+            val canOwn = (n.clickable || n.editable) && area <= MAX_OWNER_AREA_FRACTION * screenW.toLong() * screenH
+            out += Candidate(n, c.first, c.second, line(n, c.first, c.second), canOwn)
         }
         return out.sortedWith(compareBy({ it.yn }, { it.xn }, { it.node.id }))
     }
@@ -102,9 +110,13 @@ object TargetLocator {
         return JevRequest(state(cands), "{" + qs.joinToString(",") + "}")
     }
 
-    fun secondRequest(target: String, finalists: List<Candidate>): JevRequest {
+    /**
+     * 第二轮：选项只有各块入围者，但 state 仍是**全部**候选——描述常靠"哪一行""哪个区域"定位，
+     * 只给入围者会把行标签（"生椰拿铁"那一行）丢掉。
+     */
+    fun secondRequest(target: String, cands: List<Candidate>, finalists: List<Candidate>): JevRequest {
         val t = UntrustedText.sanitize(target)
-        return JevRequest(state(finalists), "{\"where\":" + where(t, finalists) + "}")
+        return JevRequest(state(cands), "{\"where\":" + where(t, finalists) + "}")
     }
 
     sealed class Verdict {
@@ -130,13 +142,13 @@ object TargetLocator {
             }
             return Verdict.NeedsSecondPass(finalists)
         }
-        return decide(t, choices[0], cands)
+        return decide(t, choices[0], cands, cands)
     }
 
-    fun interpretSecond(target: String, finalists: List<Candidate>, answers: Map<String, JevClient.Answer>): Verdict {
+    fun interpretSecond(target: String, cands: List<Candidate>, finalists: List<Candidate>, answers: Map<String, JevClient.Answer>): Verdict {
         val t = UntrustedText.sanitize(target)
         val choice = answers["where"] as? JevClient.Answer.Choice ?: return Verdict.Rejected(unavailable("响应缺少 where"))
-        return decide(t, choice, finalists)
+        return decide(t, choice, finalists, cands)
     }
 
     private fun rank(choices: List<JevClient.Answer.Choice>, byId: Map<String, Candidate>): List<Pair<Candidate, Double>> =
@@ -148,16 +160,24 @@ object TargetLocator {
      * 按"同一可点元素"合并后的分布判定：胜者是合并后概率最高的可点元素，confidence 用 Jev 的公式
      * `(n·peak − 1)/(n − 1)` 在合并后的分布上重算（n 仍是本题选项数；没有合并时与 Jev 给的一致）。
      */
-    private fun decide(t: String, choice: JevClient.Answer.Choice, cands: List<Candidate>): Verdict {
-        if (cands.none { it.node.id.toString() == choice.choice }) {
+    /**
+     * 胜者按合并后的组选，但**点击与报告的是组里 Jev 最看好的成员**：它完整落在组的容器里，点下去触发同一个
+     * 可点元素，且就是 Jev 实际指向的位置（点容器中心在大容器里可能偏离目标）。[options] 是本题的选项（第二轮只有
+     * 入围者），[pool] 是找容器用的全部候选。
+     */
+    private fun decide(t: String, choice: JevClient.Answer.Choice, options: List<Candidate>, pool: List<Candidate>): Verdict {
+        if (options.none { it.node.id.toString() == choice.choice }) {
             return Verdict.Rejected(unavailable("返回了不在候选里的编号 ${UntrustedText.sanitize(choice.choice)}"))
         }
-        val merged = merge(choice, cands)
-        val (top, peak) = merged.firstOrNull() ?: return Verdict.Rejected(unavailable("where 没有有效概率"))
+        val ranked = groups(choice, pool).map { it.members.first().first to it.p }
+        val (top, peak) = ranked.firstOrNull() ?: return Verdict.Rejected(unavailable("where 没有有效概率"))
         val confidence = confidenceOf(peak, choice.probabilities.size)
-        if (confidence < CONFIDENCE_MIN) return Verdict.Rejected(uncertain(t, merged))
+        if (confidence < CONFIDENCE_MIN) return Verdict.Rejected(uncertain(t, ranked))
         return Verdict.Located(top, confidence)
     }
+
+    /** 一组 = 一个可点元素：[owner] 是容器（或候选自己），[members] 按概率降序，[p] 为组内概率之和。 */
+    data class Group(val owner: Candidate, val members: List<Pair<Candidate, Double>>, val p: Double)
 
     /**
      * 可点容器与它里面的文字/图标子节点在 Choice 里会分摊概率——2026-09-26 回放：京东搜索栏 0.58/0.28/0.10
@@ -166,15 +186,15 @@ object TargetLocator {
      * 必须完整包含而不是只看中心：浮层下被盖住的邻居（京东品牌浮层下的"秒杀"）会与文字部分重叠，
      * 只看中心会把"华为"并进"秒杀"——同一回放里实际发生过。
      */
-    private fun merge(choice: JevClient.Answer.Choice, cands: List<Candidate>): List<Pair<Candidate, Double>> {
+    internal fun groups(choice: JevClient.Answer.Choice, cands: List<Candidate>): List<Group> {
         val byId = cands.associateBy { it.node.id.toString() }
-        val sums = LinkedHashMap<Candidate, Double>()
+        val members = LinkedHashMap<Candidate, MutableList<Pair<Candidate, Double>>>()
         for ((k, p) in choice.probabilities) {
             val c = byId[k] ?: continue
-            val owner = ownerOf(c, cands)
-            sums[owner] = (sums[owner] ?: 0.0) + p
+            members.getOrPut(ownerOf(c, cands)) { ArrayList() } += c to p
         }
-        return sums.entries.map { it.key to it.value }.sortedByDescending { it.second }
+        return members.map { (owner, ms) -> Group(owner, ms.sortedByDescending { it.second }, ms.sumOf { it.second }) }
+            .sortedByDescending { it.p }
     }
 
     private fun ownerOf(c: Candidate, cands: List<Candidate>): Candidate {
@@ -182,7 +202,7 @@ object TargetLocator {
         return cands
             .filter {
                 val o = it.node
-                (o.clickable || o.editable) && o.left <= n.left && o.top <= n.top && o.right >= n.right && o.bottom >= n.bottom
+                it.canOwn && o.left <= n.left && o.top <= n.top && o.right >= n.right && o.bottom >= n.bottom
             }
             .minByOrNull { (it.node.right - it.node.left).toLong() * (it.node.bottom - it.node.top) }
             ?: c

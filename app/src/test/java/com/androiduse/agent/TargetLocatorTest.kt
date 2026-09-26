@@ -105,11 +105,12 @@ class TargetLocatorTest {
     }
 
     @Test
-    fun secondRequestOnlyContainsFinalists() {
+    fun secondRequestKeepsEveryCandidateAsContextButOnlyFinalistsAsOptions() {
+        // 终审 Important 2：描述常靠"哪一行"定位，第二轮若只给入围者，行标签就不在 state 里了。
         val c = TargetLocator.candidates((1..5).map { node(it, 0, it * 100, 1000, it * 100 + 50, text = "项$it") }, w, h)
         val finalists = listOf(c[1], c[3])
-        val req = TargetLocator.secondRequest("项2", finalists)
-        assertEquals(finalists.map { it.line }, (MiniJson.parse(req.stateJson) as Map<*, *>)["elements"])
+        val req = TargetLocator.secondRequest("项2", c, finalists)
+        assertEquals(c.map { it.line }, (MiniJson.parse(req.stateJson) as Map<*, *>)["elements"])
         val q = MiniJson.parse(req.questionsJson) as Map<*, *>
         assertEquals(setOf("where"), q.keys)
         assertEquals(setOf("2", "4"), ((q["where"] as Map<*, *>)["criteria"] as Map<*, *>).keys)
@@ -184,8 +185,8 @@ class TargetLocatorTest {
     @Test
     fun secondPassAppliesTheConfidenceGate() {
         val f = two
-        assertEquals(13, (TargetLocator.interpretSecond("选规格", f, mapOf("where" to choice("13", mapOf("13" to 0.9, "12" to 0.1), 0.8))) as TargetLocator.Verdict.Located).candidate.node.id)
-        assertTrue(TargetLocator.interpretSecond("选规格", f, mapOf("where" to choice("13", mapOf("13" to 0.55, "12" to 0.45), 0.1))) is TargetLocator.Verdict.Rejected)
+        assertEquals(13, (TargetLocator.interpretSecond("选规格", f, f, mapOf("where" to choice("13", mapOf("13" to 0.9, "12" to 0.1), 0.8))) as TargetLocator.Verdict.Located).candidate.node.id)
+        assertTrue(TargetLocator.interpretSecond("选规格", f, f, mapOf("where" to choice("13", mapOf("13" to 0.55, "12" to 0.45), 0.1))) is TargetLocator.Verdict.Rejected)
     }
 
     @Test
@@ -215,7 +216,8 @@ class TargetLocatorTest {
             "exists" to noul(0.9),
         ))
         val loc = v as TargetLocator.Verdict.Located
-        assertEquals(150, loc.candidate.node.id)
+        // 按合并后的组判定，但点击并报告组里 Jev 最看好的那个成员（在卡片内，点下去就是卡片）
+        assertEquals(153, loc.candidate.node.id)
         // 合并后峰值 0.9，n=4：(4×0.9−1)/3
         assertEquals((4 * 0.9 - 1) / 3, loc.confidence, 1e-9)
     }
@@ -232,7 +234,7 @@ class TargetLocatorTest {
         ))
         // 按钮 0.6 归自己；标题 0.3 归卡片 → 卡片 0.4。峰值 0.6、n=3 → 0.4 < 0.6，不确定，不点。
         val msg = (v as TargetLocator.Verdict.Rejected).message
-        assertTrue(msg, msg.contains("#166 desc=\"加入购物车按钮\" 0.60；#160 0.40"))
+        assertTrue(msg, msg.contains("#166 desc=\"加入购物车按钮\" 0.60；#163 text=\"努比亚 NaviX\" 0.40"))
     }
 
     @Test
@@ -249,10 +251,23 @@ class TargetLocatorTest {
         val huaweiCell = node(124, 23, 687, 227, 839)
         val huaweiText = node(125, 24, 796, 226, 839, text = "华为", click = false)
         val c = TargetLocator.candidates(listOf(miaosha, huaweiCell, huaweiText), 1080, 2376)
-        val v = TargetLocator.interpretFirst("品牌列表里的'华为'", c, mapOf(
-            "where" to choice("125", mapOf("125" to 0.9, "58" to 0.05, "124" to 0.05), 0.85),
-            "exists" to noul(0.95),
+        val groups = TargetLocator.groups(choice("125", mapOf("125" to 0.9, "58" to 0.05, "124" to 0.05), 0.85), c)
+        assertEquals(124, groups.first().owner.node.id)
+        assertEquals(listOf(125, 124), groups.first().members.map { it.first.node.id })
+    }
+
+    @Test
+    fun aFullScreenClickableRootDoesNotAbsorbSeparateTexts() {
+        // 终审 Important 1：全屏可点根节点（或透明遮罩）完整包含页面上所有文字。若把"生椰拿铁"0.5 与"选规格"0.3
+        // 都并进它，合计过门控，会点到别的东西。超过屏幕 25% 的容器不参与合并。
+        val root = node(1, 0, 0, 1000, 2000)
+        val drink = node(2, 50, 900, 400, 950, text = "生椰拿铁", click = false)
+        val spec = node(3, 600, 900, 900, 950, text = "选规格", click = false)
+        val c = TargetLocator.candidates(listOf(root, drink, spec), w, h)
+        val v = TargetLocator.interpretFirst("选规格", c, mapOf(
+            "where" to choice("2", mapOf("2" to 0.5, "3" to 0.3, "1" to 0.2), 0.25),
+            "exists" to noul(0.9),
         ))
-        assertEquals(124, (v as TargetLocator.Verdict.Located).candidate.node.id)
+        assertTrue(v.toString(), v is TargetLocator.Verdict.Rejected)
     }
 }
